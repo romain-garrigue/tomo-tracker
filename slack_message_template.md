@@ -3,54 +3,56 @@
 This template is rendered as plain Slack markdown (not Block Kit) and sent via `slack_send_message`. Fill the placeholders with values captured during analysis. **Do not** include lines whose values are empty.
 
 ```
-:speech_balloon: *Tomo discussed — {{call_title}}*
-<{{gong_url}}|Open in Gong> · {{call_date}} · {{duration}} · {{scope}}
-*Host(s):* {{hosts}}    *Account:* {{account_or_company}}
+:studio_microphone: *Tomo mentioned — {{primary_pitcher}} with <{{gong_url}}|{{account}}>*
+:date: {{call_date_long}}
+:link: <{{gong_url}}|Open in Gong>
 
-*Pitch starts at* `{{pitch_timestamp}}`
-> {{pitch_quote_or_paraphrase}}
+*Tomo pitched:* `{{pitch_timestamp}}` _(approx — transcript has no timestamps)_
+> "{{pitch_quote}}"
+> — {{primary_pitcher}}
 
-*Objections / Questions*
-• `{{ts}}` — "{{question_quote}}" → Rep: "{{rep_answer}}"
-• `{{ts}}` — "{{question_quote}}" → ⚠️ Rep did not answer / unclear answer
+*Objections / Questions:*
+• `{{ts}}` — "{{question_quote}}" ({{questioner_name}}) → Rep: "{{rep_answer}}"
+• `{{ts}}` — "{{question_quote}}" ({{questioner_name}}) → :warning: Rep did not answer / unclear answer — {{rep_response_context}}
 
-⚠️ _Transcript incomplete — timestamp and objections may be partial._
+_Transcript timestamps unavailable in raw export — pitch/objection markers above are approximations based on position within the transcript._
 ```
 
 ## Field rules
 
 | Field | Source | Notes |
 |---|---|---|
-| `call_title` | `get_call.title` | |
-| `gong_url` | `get_call.url` | The link Slack will hyperlink "Open in Gong" against |
-| `call_date` | `get_call.started` | Format `M/D/YYYY` (e.g. `4/30/2026`) |
-| `duration` | `get_call.duration` | Format `Xm` (e.g. `28m`) |
-| `scope` | `get_call.scope` | `External` or `Internal` |
-| `hosts` | `get_call` participants flagged as host | Comma-separated full names. Omit field if unknown |
-| `account_or_company` | Best-effort from call title or participants | Omit field if unknown |
-| `pitch_timestamp` | Manual analysis | `MM:SS` or `HH:MM:SS`, the **deeper** pitch start, not the first mention |
-| `pitch_quote_or_paraphrase` | Manual analysis | 1–3 sentences. Verbatim, or label `[paraphrase]` |
-| `ts` (per Q) | Manual analysis | Timestamp of the question/objection |
-| `question_quote` | Manual analysis | Verbatim, or label `[paraphrase]` |
-| `rep_answer` | Manual analysis | Verbatim. If rep didn't answer or deflected, replace the entire `→ Rep: ...` segment with `→ ⚠️ Rep did not answer / unclear answer` |
+| `primary_pitcher` | The Maki rep who actively pitches Tomo on the call (not necessarily the host). Identify them by reading the transcript. | E.g. `Benjamin Chino`, `Richard Millington`. |
+| `gong_url` | `get_call.url` | Used twice — as the link target for the account name in the header AND for the explicit "Open in Gong" line. |
+| `account` | Best-effort from call title, summary, or external participant's company. | E.g. `Booking.com`, `Accenture`. If genuinely unknown, fall back to the call title. |
+| `call_date_long` | `get_call.started` formatted as long date | E.g. `April 30, 2026` (not `4/30/2026`). |
+| `pitch_timestamp` | Computed from `get_call_summary` outline (see SKILL.md §4d). | `MM:SS` or `HH:MM:SS`. Always prefix with `~` since this is approximate (e.g. `~3:30`). |
+| `pitch_quote` | Verbatim transcript quote where the rep delivers the pitch. 1–4 sentences. | Never fabricate. If unclear, label `[paraphrase]`. |
+| `ts` (per Q) | Computed from `get_call_summary` outline (see SKILL.md §4d). | Always prefix with `~`. |
+| `question_quote` | Verbatim or `[paraphrase]`. | |
+| `questioner_name` | The prospect/customer who raised the question. | E.g. `Allan Racey`, `Jolie Den Boer`. |
+| `rep_answer` | Verbatim rep response. | |
+| `rep_response_context` | When the rep did NOT answer or deflected, replace `→ Rep: "..."` with `→ :warning: Rep did not answer / unclear answer — {{rep_response_context}}` where the context is a short verbatim phrase showing how they deflected. | E.g. `Richard: "I've not actually thought of it like that."` |
 
 ## Conditional / omittable lines
 
-- **`Account:` segment** — omit if unknown (just keep `*Host(s):* ...` on that line).
 - **`Objections / Questions` block** — if there were none, replace the entire block with: `*Objections / Questions:* none`.
-- **Transcript-incomplete footer** — include only if `transcript_incomplete = true`.
+- **Transcript-incomplete footer** — if the transcript itself was truncated/missing (separate from the timestamp caveat), append an extra line: `:warning: _Transcript incomplete — pitch and objections may be partial._`
+- **Approximation footer** — keep the italic footer about approximations whenever timestamps were derived from outline durations rather than exact markers (i.e. always, with the current Gong MCP).
 
 ## Rendered example
 
 ```
-:speech_balloon: *Tomo discussed — Equium Partners x Maki*
-<https://us-12345.app.gong.io/call?id=7969383385873943560|Open in Gong> · 4/30/2026 · 41m · External
-*Host(s):* Marc Schweitzer    *Account:* Equium Partners
+:studio_microphone: *Tomo mentioned — Benjamin Chino with <https://eu-93246.app.gong.io/call?id=1516437862980615235|Booking.com>*
+:date: April 30, 2026
+:link: <https://eu-93246.app.gong.io/call?id=1516437862980615235|Open in Gong>
 
-*Pitch starts at* `12:34`
-> "So Tomo is our AI interview copilot — it joins the interview, transcribes, takes structured notes, and produces a scored summary tailored to the role…"
+*Tomo pitched:* `~3:30` _(approx — transcript has no timestamps)_
+> "We actually launched a product a couple of weeks ago called Tomo which is an interview assistant. And what that product does is one, it preps the interview for hiring managers and recruiters. So it literally generates an interview plan, and then two, it assists during the interview, meaning that it records, it transcribes, and then it leverages our entire scoring system in order to score the performance of the candidate."
+> — Benjamin Chino
 
-*Objections / Questions*
-• `15:02` — "How does it integrate with our ATS?" → Rep: "We have native integrations with Greenhouse and Workday today, others via API."
-• `18:45` — "What about GDPR and where is data stored?" → ⚠️ Rep did not answer / unclear answer
+*Objections / Questions:*
+• `~5:00` — "I don't know if we will be able to use it or that our legal team will allow it because our legal is quite a pain." (Jolie Den Boer) → :warning: Rep did not answer / unclear answer — Natasha pivoted to top-of-funnel assessment opportunities instead.
+
+_Transcript timestamps unavailable in raw export — pitch/objection markers above are approximations based on position within the transcript._
 ```

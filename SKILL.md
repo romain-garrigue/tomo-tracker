@@ -69,10 +69,12 @@ For each new call:
 #### 4a. Fetch metadata
 Call `get_call` with the call ID. Capture: `title`, `url`, `started` (date), `duration`, `scope`, host names if present.
 
-#### 4b. Fetch transcript
+#### 4b. Fetch transcript and summary
 Call `get_call_transcript` with `maxLength: 100000`. If the response indicates truncation, paginate with `offset` until the full transcript is retrieved or you've made 5 pages of progress (cap to avoid runaway).
 
-If the transcript is unavailable (404, denied, empty): set `transcript_incomplete = true` and fall back to `get_call_summary`. If even the summary lacks Tomo signals, mark the call processed and skip.
+Also call `get_call_summary` for the same call. The summary's **Outline** is the source of truth for approximate timestamps (see §4d Timestamp computation below) — the raw transcript does **not** include time markers in the current Gong MCP.
+
+If the transcript is unavailable (404, denied, empty): set `transcript_incomplete = true` and rely on `get_call_summary` alone. If even the summary lacks Tomo signals, mark the call processed and skip.
 
 #### 4c. Quick filter — Tomo signals
 
@@ -96,14 +98,29 @@ Read the transcript around each Tomo signal with enough context (~30 seconds bef
 - If Tomo is **only mentioned once or in passing** with no real pitch AND no question AND no objection: mark `meaningful = false`, mark the call processed, skip. **Do not** send a Slack message.
 
 **Pitch capture (when meaningful)**
-- `pitch_timestamp`: HH:MM:SS or MM:SS where the deeper pitch starts.
-- `pitch_quote`: 1–3 sentence verbatim quote from the rep at that moment. If the transcript is unclear or paraphrased, label as `[paraphrase]`.
+- `primary_pitcher`: the Maki rep who delivers the pitch (read it off the transcript). Use their full name as it appears in `get_call` participants.
+- `pitch_timestamp`: computed from the summary outline — see **Timestamp computation** below. Always prefixed with `~`.
+- `pitch_quote`: 1–4 sentence verbatim quote from the rep at that moment. If the transcript is unclear or paraphrased, label as `[paraphrase]`.
 
 **Objections / Questions**
 - For every moment where the **prospect or customer** asks a question, pushes back, expresses doubt, or signals hesitation **about Tomo specifically** (not other Maki products), capture:
-  - `ts`: timestamp
-  - `question_quote`: verbatim or `[paraphrase]`
-  - `rep_answer`: verbatim answer, OR the marker `⚠️ Rep did not answer / unclear answer` if the rep deflected, changed subject, or gave a clearly insufficient response.
+  - `ts`: timestamp (computed via outline — see below).
+  - `question_quote`: verbatim or `[paraphrase]`.
+  - `questioner_name`: the prospect/customer who raised it.
+  - `rep_answer`: verbatim answer, OR — if the rep deflected, changed subject, or gave a clearly insufficient response — replace the `→ Rep: "..."` segment with `→ :warning: Rep did not answer / unclear answer — {{short context}}`, where the context is a brief verbatim phrase showing the deflection.
+
+**Timestamp computation (outline-based)**
+
+The current Gong MCP's `get_call_transcript` returns speaker-attributed text **without** time markers. To produce useful approximate timestamps, walk the **`### Outline`** section of `get_call_summary`:
+
+1. Each top-level outline section has the form `**{topic name}** ({D}m)` where `{D}` is its duration in whole minutes.
+2. Compute each section's start time by **summing the durations of all preceding sections**. Section #1 starts at `0:00`; section #2 starts at `{duration of #1}:00`; and so on.
+3. Identify the section whose bullet content describes the Tomo pitch (or the objection). Use that section's computed start time as the timestamp for the pitch (or for the objection that lives within it).
+4. If a single section contains both the pitch and an objection that comes a minute or two later, offset the objection by ~1 minute from the section start as a rough cue.
+5. Always prefix the rendered timestamp with `~` — these are approximations, never claim precision.
+6. Keep the standard footer in the Slack message acknowledging that timestamps are approximate.
+
+**Note for future improvement:** the cleanest fix is for an admin to create a Gong **keyword tracker** for `Tomo` in the Maki workspace (Gong UI → Smart Trackers). Once that exists, `get_call_summary` will surface tracker hits with exact timestamps, and §4d can be simplified to read those directly. We currently have 11 trackers (Budget, Pricing, Objections, etc.) but no Tomo tracker.
 
 #### 4e. Build and send Slack message
 
@@ -168,5 +185,6 @@ Any moment where the prospect or customer asks a question, pushes back, expresse
 - **Skip calls already in `processedCallIds`.** Never re-analyze them.
 - **Facts only.** No commentary, coaching notes, or analysis in the Slack message.
 - **Never fabricate quotes.** Always label reconstructed content as `[paraphrase]`.
-- **If the transcript is missing or incomplete**, send the notification with the warning footer:
-  > ⚠️ _Transcript incomplete — timestamp and objections may be partial._
+- **If the transcript is missing or incomplete**, send the notification with the additional warning line:
+  > :warning: _Transcript incomplete — pitch and objections may be partial._
+- **Always include the approximation footer** about timestamps unless/until a Tomo keyword tracker exists in Gong (see §4d).

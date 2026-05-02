@@ -10,6 +10,16 @@ const headers = {
   Accept: "application/json",
 };
 
+class GongHttpError extends Error {
+  constructor(
+    public status: number,
+    public body: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 async function gongFetch(path: string, init: RequestInit = {}): Promise<any> {
   const res = await fetch(`${config.gong.baseUrl}${path}`, {
     ...init,
@@ -17,9 +27,21 @@ async function gongFetch(path: string, init: RequestInit = {}): Promise<any> {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Gong ${init.method ?? "GET"} ${path} → ${res.status}: ${text}`);
+    throw new GongHttpError(
+      res.status,
+      text,
+      `Gong ${init.method ?? "GET"} ${path} → ${res.status}: ${text}`,
+    );
   }
   return res.json();
+}
+
+function isNoCallsFound(err: unknown): boolean {
+  return (
+    err instanceof GongHttpError &&
+    err.status === 404 &&
+    /No calls found/i.test(err.body)
+  );
 }
 
 export interface GongCall {
@@ -52,10 +74,16 @@ export async function listCalls(
       },
     };
     if (cursor) body.cursor = cursor;
-    const json = await gongFetch("/v2/calls/extensive", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    let json: any;
+    try {
+      json = await gongFetch("/v2/calls/extensive", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      if (isNoCallsFound(err)) return calls;
+      throw err;
+    }
     for (const c of json.calls ?? []) {
       const m = c.metaData ?? {};
       calls.push({

@@ -1,0 +1,55 @@
+name: tomo-tracker
+
+on:
+  schedule:
+    # 7:07, 10:07, 13:07, 16:07 UTC weekdays.
+    # ≈ 8:07/11:07/14:07/17:07 Paris (winter) or 9:07/12:07/15:07/18:07 Paris (summer).
+    # GitHub Actions cron is UTC-only and can be delayed several minutes under load.
+    - cron: "7 7,10,13,16 * * 1-5"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tomo-tracker
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - name: Run tomo-tracker
+        env:
+          GONG_BASE_URL: https://eu-93246.api.gong.io
+          GONG_WORKSPACE_ID: "6135656620898778750"
+          GONG_ACCESS_KEY: ${{ secrets.GONG_ACCESS_KEY }}
+          GONG_ACCESS_KEY_SECRET: ${{ secrets.GONG_ACCESS_KEY_SECRET }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: claude-opus-4-7
+        run: npm start
+
+      - name: Commit state if changed
+        run: |
+          if [[ -z $(git status --porcelain state/processed_calls.json) ]]; then
+            echo "No state changes; skipping commit."
+            exit 0
+          fi
+          git config user.name "tomo-tracker[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/processed_calls.json
+          git commit -m "state: scheduled run $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push

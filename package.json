@@ -1,0 +1,22 @@
+{
+  "name": "tomo-tracker",
+  "version": "1.0.0",
+  "description": "Scan new Gong calls for meaningful Tomo discussions and post structured Slack alerts.",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.30.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}

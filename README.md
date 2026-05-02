@@ -2,63 +2,110 @@
 
 Hands-off monitor that scans new Gong calls every few hours and posts a structured Slack alert to **#tomo-mention-alerts** whenever Sales or CSMs meaningfully discuss **Tomo** — Maki's AI interview copilot.
 
+The whole thing runs from this repo via GitHub Actions — no local cron, no local state.
+
 ## What it captures
 
 For every Gong call where Tomo is **actively pitched** (not just mentioned in passing):
 
-- **Pitch timestamp** — the moment the rep starts walking through Tomo (not the first throwaway mention), so you can jump straight to it in Gong.
-- **Objections / questions** raised by the prospect or customer about Tomo, with timestamps and verbatim quotes.
-- **Unanswered questions** — flagged when the rep deflects or gives an unclear answer.
+- **Pitch timestamp** — exact `MM:SS` from the Gong transcript, jump straight to that moment.
+- **Objections / questions** raised by the prospect/customer about Tomo, with timestamps and verbatim quotes.
+- **Unanswered questions** — flagged when the rep deflects or gives an unclear answer, with the deflection captured verbatim.
 
-## How it works
+## Architecture
 
-1. A Claude scheduled task fires on a cron — by default **9:07, 12:07, 15:07, 18:07** local time, weekdays.
-2. The task runs the [`SKILL.md`](./SKILL.md) procedure:
-   - Pulls this repo.
-   - Reads `state/processed_calls.json` to find which calls have already been analyzed.
-   - Lists new Gong calls in the Maki workspace since `lastRunAt`.
-   - For each new call: fetches the transcript, applies the detection rules in `SKILL.md`, and — only if Tomo was meaningfully discussed — posts one structured Slack message per call to `#tomo-mention-alerts`.
-   - Updates `state/processed_calls.json` and commits/pushes back here.
+```
+.github/workflows/tomo-tracker.yml      cron + workflow_dispatch
+            │
+            ▼
+   npm ci → npm run typecheck → npm start (src/index.ts)
+            │
+            ├── Gong API   ── list_calls / transcript / extensive
+            ├── Anthropic  ── Claude (claude-opus-4-7) judges meaningful pitch + extracts facts
+            └── Slack      ── incoming webhook posts to #tomo-mention-alerts
+            │
+            ▼
+   state/processed_calls.json updated, committed by GH Actions
+```
 
-The repo is the single source of truth: detection rules live in [`SKILL.md`](./SKILL.md), the alert format lives in [`slack_message_template.md`](./slack_message_template.md), and the processed-call ledger lives in [`state/processed_calls.json`](./state/processed_calls.json).
+The Claude API call uses **forced tool use** with a strict JSON schema — the model must call `report_findings` exactly once, and the script parses the structured output to render the Slack message. No free-form text, no hallucinated quotes.
 
-## Required MCP servers
+## Repo layout
 
-The Claude that runs this task must have these MCP servers connected:
+```
+src/
+├── index.ts        # main entry: list → analyze → alert → save state
+├── config.ts       # env-var loading
+├── gong.ts         # Gong API client (with timestamp-bearing transcripts)
+├── claude.ts       # Anthropic SDK + system prompt + tool schema
+├── render.ts       # Slack message renderer + Tomo signal regex
+├── slack.ts        # incoming-webhook POST
+└── state.ts        # read/write state/processed_calls.json
+.github/workflows/
+└── tomo-tracker.yml
+state/
+└── processed_calls.json
+```
 
-- **Gong** — provides `list_calls`, `get_call`, `get_call_transcript`, `get_call_summary`.
-- **Slack** — provides `slack_send_message`.
+## Run cadence
 
-Workspace ID and channel ID are hard-coded in `SKILL.md` for the Maki workspace.
+GitHub Actions cron (UTC):
+
+```
+7 7,10,13,16 * * 1-5
+```
+
+≈ **8:07 / 11:07 / 14:07 / 17:07** Paris in winter, **9:07 / 12:07 / 15:07 / 18:07** in summer (DST shifts the wall-clock time by 1h). Cron firings can be delayed a few minutes under GitHub Actions load.
+
+To change cadence: edit `.github/workflows/tomo-tracker.yml`.
+
+## Required GitHub Secrets
+
+Set these in `Settings → Secrets and variables → Actions`:
+
+| Secret | Where to get it |
+|---|---|
+| `GONG_ACCESS_KEY` | Gong → Company Settings → API → Generate access key |
+| `GONG_ACCESS_KEY_SECRET` | Same flow — store the secret immediately, it's shown once |
+| `SLACK_WEBHOOK_URL` | Slack → Apps → Incoming Webhooks → Add to Slack → channel `#tomo-mention-alerts` → copy URL |
+| `ANTHROPIC_API_KEY` | https://console.anthropic.com → Settings → API keys |
+
+The Gong base URL (`https://eu-93246.api.gong.io`), workspace ID, and Slack channel are baked into the workflow / source — no env override needed for normal use.
 
 ## Manual run
 
-From any Claude session with both MCP servers connected:
+```
+gh workflow run tomo-tracker
+```
 
-> "Run the tomo-tracker SKILL at `~/code/tomo-tracker/SKILL.md` following its run procedure exactly."
+…or click *Run workflow* in the GitHub Actions UI. The same code runs whether triggered by cron or manually.
 
-Claude will pull, analyze, post any alerts, and commit the updated state.
+## Local debugging
 
-## Inspecting / changing the schedule
+```bash
+npm install
+cp .env.example .env  # fill in the four secrets
+npm start
+```
 
-In Claude:
-
-- `mcp__scheduled-tasks__list_scheduled_tasks` — see when the next run is.
-- `mcp__scheduled-tasks__update_scheduled_task` — change cadence or disable.
+(`.env` is gitignored — never commit credentials.)
 
 ## Resetting state
 
-To force a re-analysis of recent calls (e.g. after editing detection rules):
+To force re-analysis of recent calls (e.g. after editing the system prompt):
 
 ```bash
 echo '{ "lastRunAt": "2026-04-01T00:00:00Z", "processedCallIds": [] }' > state/processed_calls.json
 git add state/processed_calls.json && git commit -m "state: reset for re-analysis" && git push
 ```
 
-## Files
+The next run (cron or manual) will pick it up.
+
+## Files of note
 
 | Path | Purpose |
 |---|---|
-| [`SKILL.md`](./SKILL.md) | Canonical detection rules + run procedure (the brain) |
-| [`slack_message_template.md`](./slack_message_template.md) | Format of each Slack alert |
-| [`state/processed_calls.json`](./state/processed_calls.json) | Ledger: `lastRunAt` + processed call IDs |
+| [`src/claude.ts`](src/claude.ts) | Detection rules + tool schema (the brain) |
+| [`src/render.ts`](src/render.ts) | Slack message format |
+| [`src/gong.ts`](src/gong.ts) | Gong API client — transcripts include `[MM:SS]` timestamps from `/v2/calls/transcript` |
+| [`state/processed_calls.json`](state/processed_calls.json) | Ledger: `lastRunAt` + processed call IDs (capped at 500) |

@@ -37,7 +37,15 @@ jobs:
           GONG_WORKSPACE_ID: "6135656620898778750"
           GONG_ACCESS_KEY: ${{ secrets.GONG_ACCESS_KEY }}
           GONG_ACCESS_KEY_SECRET: ${{ secrets.GONG_ACCESS_KEY_SECRET }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          # Channel IDs live in repo Variables (Settings → Variables → Actions),
+          # not code. Unset variables fall back to the defaults in src/config.ts
+          # (tomo → C0B0CHKC58X; others → skipped until their channel exists).
+          SLACK_CHANNEL_TOMO: ${{ vars.SLACK_CHANNEL_TOMO }}
+          SLACK_CHANNEL_MOCHI: ${{ vars.SLACK_CHANNEL_MOCHI }}
+          SLACK_CHANNEL_KUMI: ${{ vars.SLACK_CHANNEL_KUMI }}
+          SLACK_CHANNEL_SHIRO_KEN: ${{ vars.SLACK_CHANNEL_SHIRO_KEN }}
+          SLACK_CHANNEL_PRODUCT_SIGNALS: ${{ vars.SLACK_CHANNEL_PRODUCT_SIGNALS }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_MODEL: claude-opus-4-7
         run: npm start

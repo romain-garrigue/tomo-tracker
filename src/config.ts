@@ -30,14 +30,19 @@ const channels = {
   productSignals: process.env.SLACK_CHANNEL_PRODUCT_SIGNALS ?? "",
 };
 
+// When set, route EVERY tracker + the signals feed to this one channel/DM
+// instead of the real channels — a safe end-to-end dry-run that never touches
+// production channels. Wired to the workflow_dispatch `dry_run_channel` input.
+const dryRunChannel = process.env.DRY_RUN_CHANNEL || "";
+
 // One entry per product codename. Shiro and Ken point at the same channel but
 // keep distinct labels/emojis so the header says which product was pitched.
 const trackers: Tracker[] = [
-  { key: "tomo", label: "Tomo", emoji: ":studio_microphone:", channelId: channels.tomo },
-  { key: "mochi", label: "Mochi", emoji: ":telephone_receiver:", channelId: channels.mochi },
-  { key: "kumi", label: "Kumi", emoji: ":calendar:", channelId: channels.kumi },
-  { key: "shiro", label: "Shiro", emoji: ":clipboard:", channelId: channels.shiroKen },
-  { key: "ken", label: "Ken", emoji: ":microscope:", channelId: channels.shiroKen },
+  { key: "tomo", label: "Tomo", emoji: ":studio_microphone:", channelId: dryRunChannel || channels.tomo },
+  { key: "mochi", label: "Mochi", emoji: ":telephone_receiver:", channelId: dryRunChannel || channels.mochi },
+  { key: "kumi", label: "Kumi", emoji: ":calendar:", channelId: dryRunChannel || channels.kumi },
+  { key: "shiro", label: "Shiro", emoji: ":clipboard:", channelId: dryRunChannel || channels.shiroKen },
+  { key: "ken", label: "Ken", emoji: ":microscope:", channelId: dryRunChannel || channels.shiroKen },
 ];
 
 export const config = {
@@ -51,13 +56,13 @@ export const config = {
     botToken: required("SLACK_BOT_TOKEN"),
     channels,
     trackers,
-    productSignalsChannel: channels.productSignals,
+    productSignalsChannel: dryRunChannel || channels.productSignals,
     productSignalsEmoji: ":bulb:",
   },
   anthropic: {
     apiKey: required("ANTHROPIC_API_KEY"),
     model: process.env.ANTHROPIC_MODEL ?? "claude-opus-4-7",
   },
-  backfillDays: Number(process.env.BACKFILL_DAYS ?? 7),
+  backfillDays: Number(process.env.BACKFILL_DAYS || 7),
   statePath: process.env.STATE_PATH ?? "state/processed_calls.json",
 };

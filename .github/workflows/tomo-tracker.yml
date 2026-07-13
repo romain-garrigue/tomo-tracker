@@ -7,6 +7,15 @@ on:
     # GitHub Actions cron is UTC-only and can be delayed several minutes under load.
     - cron: "7 7,10,13,16 * * 1-5"
   workflow_dispatch:
+    inputs:
+      dry_run_channel:
+        description: "Route ALL alerts to this channel/DM ID (e.g. U096JJ1GSAJ) and skip the state commit. Leave blank for a real run."
+        required: false
+        default: ""
+      backfill_days:
+        description: "Look-back window in days when state has no lastRunAt (dry-run / fresh state only)."
+        required: false
+        default: "14"
 
 permissions:
   contents: write
@@ -48,6 +57,11 @@ jobs:
           SLACK_CHANNEL_PRODUCT_SIGNALS: ${{ vars.SLACK_CHANNEL_PRODUCT_SIGNALS }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_MODEL: claude-opus-4-7
+          # Dry-run knobs (empty on cron): route everything to one channel and
+          # write state to a throwaway path so the committed state is untouched.
+          DRY_RUN_CHANNEL: ${{ inputs.dry_run_channel }}
+          BACKFILL_DAYS: ${{ inputs.backfill_days }}
+          STATE_PATH: ${{ inputs.dry_run_channel != '' && '/tmp/dryrun-state.json' || 'state/processed_calls.json' }}
         run: npm start
 
       - name: Commit state if changed

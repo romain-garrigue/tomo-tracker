@@ -270,10 +270,19 @@ Apply the rules and call report_findings exactly once.`;
       `Claude did not call report_findings. Stop reason: ${response.stop_reason}`,
     );
   }
-  const input = toolUse.input as Partial<AnalysisResult>;
+  // Forced tool use doesn't strictly validate types — the model can still
+  // return a non-array where the schema says array. Coerce defensively so a
+  // single malformed field can't crash the whole call.
+  const input = toolUse.input as Record<string, unknown>;
+  const arr = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
   return {
-    account: input.account ?? call.title,
-    product_findings: input.product_findings ?? [],
-    customer_signals: input.customer_signals ?? [],
+    account:
+      typeof input.account === "string" && input.account ? input.account : call.title,
+    product_findings: arr<ProductFinding>(input.product_findings).map((f) => ({
+      ...f,
+      questions: arr<InteractionEntry>(f?.questions),
+      objections: arr<InteractionEntry>(f?.objections),
+    })),
+    customer_signals: arr<CustomerSignal>(input.customer_signals),
   };
 }

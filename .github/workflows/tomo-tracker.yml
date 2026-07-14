@@ -27,7 +27,9 @@ concurrency:
 jobs:
   run:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Generous headroom for the one-time multi-day backfill (one Claude call
+    # per call). Incremental steady-state runs finish in well under a minute.
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
 
@@ -41,6 +43,7 @@ jobs:
       - run: npm run typecheck
 
       - name: Run tomo-tracker
+        timeout-minutes: 40
         env:
           GONG_BASE_URL: https://eu-93246.api.gong.io
           GONG_WORKSPACE_ID: "6135656620898778750"
@@ -65,6 +68,9 @@ jobs:
         run: npm start
 
       - name: Commit state if changed
+        # Runs even if the app step timed out mid-backfill, so incrementally
+        # flushed progress is persisted and the next run resumes where it left off.
+        if: always()
         run: |
           if [[ -z $(git status --porcelain state/processed_calls.json) ]]; then
             echo "No state changes; skipping commit."

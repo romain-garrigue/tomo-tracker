@@ -59,10 +59,16 @@ async function processCall(call: GongCall, state: State): Promise<CallOutcome> {
   log("call.analyze", { id: call.id });
   const result = await analyze(call, transcript, summary);
 
+  // Prospect/customer-voiced signals; internal-relayed ones are dropped.
+  const externalSignals = result.customer_signals.filter(
+    (s) => s.speaker_side !== "internal",
+  );
+
   let alerts = 0;
   let failures = 0;
 
-  // Per-product fan-out.
+  // Per-product fan-out. The agent message is enriched with that product's
+  // own requests/gaps/competitors, pulled from the shared signal extraction.
   for (const finding of result.product_findings) {
     if (!finding.meaningful) continue;
     const tracker = trackerByKey.get(finding.product);
@@ -79,10 +85,11 @@ async function processCall(call: GongCall, state: State): Promise<CallOutcome> {
       failures++;
       continue;
     }
+    const productSignals = externalSignals.filter((s) => s.product === finding.product);
     try {
       await sendSlackMessage(
         tracker.channelId,
-        renderProductMessage(tracker, call, finding),
+        renderProductMessage(tracker, call, finding, productSignals),
       );
       markAlerted(state, call.id, finding.product);
       alerts++;
@@ -97,10 +104,7 @@ async function processCall(call: GongCall, state: State): Promise<CallOutcome> {
     }
   }
 
-  // Customer-signals fan-out (prospect/customer side only, grouped per call).
-  const externalSignals = result.customer_signals.filter(
-    (s) => s.speaker_side !== "internal",
-  );
+  // Customer-signals fan-out (grouped per call, one message to #product-signals).
   if (externalSignals.length > 0 && !hasAlerted(state, call.id, "product-signals")) {
     const channelId = config.slack.productSignalsChannel;
     if (!channelId) {
@@ -159,7 +163,7 @@ async function main(): Promise<void> {
     return;
   }
 
-  const newlyProcessed: string[] = [];
+  let processedThisRun = 0;
   let alertCount = 0;
   let failureCount = 0;
 
@@ -168,10 +172,13 @@ async function main(): Promise<void> {
       const r = await processCall(call, state);
       alertCount += r.alerts;
       failureCount += r.failures;
-      // Only mark the call done when every send succeeded — a failed send
-      // (e.g. bot not in a channel yet) leaves it for retry next run, while
-      // sentAlerts stops the successful ones from re-posting.
-      if (r.processed && r.failures === 0) newlyProcessed.push(call.id);
+      // Mark done only when every send succeeded — a failed send (e.g. bot not
+      // in a channel yet) leaves the call for retry, while sentAlerts stops the
+      // sends that DID land from re-posting.
+      if (r.processed && r.failures === 0) {
+        state.processedCallIds.push(call.id);
+        processedThisRun++;
+      }
     } catch (err) {
       failureCount++;
       log("call.error", {
@@ -179,17 +186,21 @@ async function main(): Promise<void> {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+    // Flush after every call so a timeout/crash mid-backfill keeps progress
+    // (the workflow's commit step runs with if: always()).
+    await writeState(state);
   }
 
-  state.processedCallIds = [...state.processedCallIds, ...newlyProcessed];
-  // Advance the window only if we fully processed something; otherwise keep
-  // lastRunAt so failed calls stay in range for a retry.
-  if (newlyProcessed.length > 0) state.lastRunAt = toDate;
-  await writeState(state);
+  // Advance the window only if the whole batch went through cleanly; otherwise
+  // keep lastRunAt so unfinished/failed calls stay in range next run.
+  if (failureCount === 0) {
+    state.lastRunAt = toDate;
+    await writeState(state);
+  }
 
   log("run.complete", {
     analyzed: newCalls.length,
-    fullyProcessed: newlyProcessed.length,
+    fullyProcessed: processedThisRun,
     alerted: alertCount,
     failed: failureCount,
   });

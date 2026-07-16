@@ -26,12 +26,18 @@ function titleCase(s: string): string {
   return s ? s[0].toUpperCase() + s.slice(1) : s;
 }
 
-function renderInteraction(e: InteractionEntry): string {
-  const head = `• "${oneLine(e.quote)}" (${e.speaker_name})`;
+// Summary-first, like the signal bullets: the point in plain language, the
+// quote as evidence, then how the rep handled it (answer vs. genuine non-answer).
+function renderInteraction(e: InteractionEntry): string[] {
+  const out = [`• ${oneLine(e.summary)} — ${e.speaker_name}`];
+  if (e.quote) out.push(`> "${oneLine(e.quote)}"`);
+  const handling = oneLine(e.rep_answer_or_deflection);
   if (e.rep_answered) {
-    return `${head} → Rep: "${oneLine(e.rep_answer_or_deflection)}"`;
+    out.push(`→ Rep: ${handling ? `"${handling}"` : "answered"}`);
+  } else {
+    out.push(`→ :warning: No clear answer${handling ? ` — ${handling}` : ""}`);
   }
-  return `${head} → :warning: unanswered — ${oneLine(e.rep_answer_or_deflection)}`;
+  return out;
 }
 
 // A summary-first signal bullet: the need in plain language, the quote as evidence.
@@ -68,14 +74,14 @@ export function renderProductMessage(
   if (questions.length) {
     lines.push("");
     lines.push(`*Questions*`);
-    for (const q of questions) lines.push(renderInteraction(q));
+    for (const q of questions) lines.push(...renderInteraction(q));
   }
 
   const objections = finding.objections ?? [];
   if (objections.length) {
     lines.push("");
     lines.push(`*Objections / concerns*`);
-    for (const o of objections) lines.push(renderInteraction(o));
+    for (const o of objections) lines.push(...renderInteraction(o));
   }
 
   const reqGaps = signals.filter((s) => s.type === "feature_request" || s.type === "gap");

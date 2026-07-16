@@ -6,6 +6,9 @@ const client = new Anthropic({ apiKey: config.anthropic.apiKey });
 
 // A prospect/customer question or objection about a product, with how the rep handled it.
 export interface InteractionEntry {
+  // Self-contained statement of what is being asked/objected (primary line).
+  summary: string;
+  // Verbatim excerpt that justifies the summary.
   quote: string;
   speaker_name: string;
   rep_answered: boolean;
@@ -78,7 +81,13 @@ For each finding:
 - primary_pitcher (Maki rep full name; empty if meaningful=false), account, pitch_quote (verbatim core of the pitch; empty if meaningful=false).
 - questions[]: genuine information-seeking QUESTIONS the prospect/customer asks about THIS product.
 - objections[]: pushback, doubts, concerns, or hesitations about THIS product.
-  Each entry: quote (verbatim; "[paraphrase]" only if unclear), speaker_name, rep_answered (true ONLY if answered substantively), rep_answer_or_deflection (verbatim answer, or a short verbatim phrase showing the deflection). Empty arrays if none.
+  Each entry (both arrays) has:
+  - summary — a SELF-CONTAINED sentence stating what is being asked/objected, understandable without the transcript. Primary content.
+  - quote — a verbatim excerpt that justifies the summary ("[paraphrase]" only if truly unclear).
+  - speaker_name.
+  - rep_answered — TRUE if the rep responds substantively OR commits to follow up (e.g. "I'll check and get back to you", "let me confirm and revert" counts as answered=true — it is a legitimate deferred answer). FALSE only if the rep ignores it, changes the subject, or gives a genuine non-response.
+  - rep_answer_or_deflection — if answered: the rep's verbatim answer (which may be a deferral/commitment). If NOT answered: a SHORT note describing what the rep did instead (e.g. "moved on to pricing without addressing it") — do NOT put text that reads like an answer.
+  Empty arrays if none.
 - transcript_incomplete: true if the transcript looks truncated.
 
 # Part 2 — customer_signals
@@ -112,19 +121,28 @@ DEDUPLICATION: one signal per distinct idea. NEVER emit the same quote or moment
 const INTERACTION_ITEM_SCHEMA = {
   type: "object",
   properties: {
-    quote: { type: "string", description: "Verbatim quote. '[paraphrase]' if unclear." },
+    summary: {
+      type: "string",
+      description:
+        "Self-contained sentence stating what is being asked/objected, understandable without the transcript. Primary content.",
+    },
+    quote: {
+      type: "string",
+      description: "Verbatim excerpt justifying the summary. '[paraphrase]' if unclear.",
+    },
     speaker_name: { type: "string" },
     rep_answered: {
       type: "boolean",
-      description: "True only if the rep answered substantively; false if deflected/unclear.",
+      description:
+        "TRUE if the rep responds substantively OR commits to follow up ('I'll check and get back to you' = true). FALSE only if the rep ignores it, changes the subject, or gives a genuine non-response.",
     },
     rep_answer_or_deflection: {
       type: "string",
       description:
-        "If answered: the rep's verbatim answer. If not: a short verbatim phrase showing the deflection.",
+        "If answered: the rep's verbatim answer (may be a deferral/commitment). If NOT answered: a short note describing what the rep did instead — NOT text that reads like an answer.",
     },
   },
-  required: ["quote", "speaker_name", "rep_answered", "rep_answer_or_deflection"],
+  required: ["summary", "quote", "speaker_name", "rep_answered", "rep_answer_or_deflection"],
 } as const;
 
 const ANALYSIS_TOOL: Anthropic.Tool = {

@@ -50,9 +50,8 @@ jobs:
           GONG_ACCESS_KEY: ${{ secrets.GONG_ACCESS_KEY }}
           GONG_ACCESS_KEY_SECRET: ${{ secrets.GONG_ACCESS_KEY_SECRET }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
-          # Single consolidated channel (#product-signals). Repo Variable;
-          # falls back to the default in src/config.ts when unset.
-          SLACK_CHANNEL_PRODUCT_SIGNALS: ${{ vars.SLACK_CHANNEL_PRODUCT_SIGNALS }}
+          # Channel IDs are defaulted in src/config.ts (per-agent + new-product),
+          # env-overridable there if a channel ever moves.
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_MODEL: claude-opus-4-7
           # Dry-run knobs (empty on cron): route everything to one channel and

@@ -8,7 +8,7 @@ import {
   listCalls,
   type GongCall,
 } from "./gong.ts";
-import { renderCallSignals } from "./render.ts";
+import { renderAgentMessage, renderNewProductMessage } from "./render.ts";
 import { sendSlackMessage } from "./slack.ts";
 import {
   hasAlerted,
@@ -61,32 +61,62 @@ async function processCall(call: GongCall, state: State): Promise<CallOutcome> {
   let alerts = 0;
   let failures = 0;
 
-  // One consolidated message per call → the single #product-signals channel.
-  if (externalSignals.length === 0) {
-    log("call.no_signals", { id: call.id });
-  } else if (!hasAlerted(state, call.id, "product-signals")) {
-    const channelId = config.slack.signalsChannel;
+  // One message per agent that has ≥1 signal → that agent's channel.
+  for (const agent of config.slack.agents) {
+    const agentSignals = externalSignals.filter((s) => s.product === agent.key);
+    if (agentSignals.length === 0) continue;
+    if (hasAlerted(state, call.id, agent.key)) continue;
+    if (!agent.channelId) {
+      log("call.channel_not_configured", { id: call.id, tracker: agent.key });
+      failures++;
+      continue;
+    }
+    try {
+      await sendSlackMessage(
+        agent.channelId,
+        renderAgentMessage(agent, call, result.account, agentSignals),
+      );
+      markAlerted(state, call.id, agent.key);
+      alerts++;
+      log("call.alerted_agent", { id: call.id, product: agent.key });
+    } catch (err) {
+      failures++;
+      log("call.alert_error", {
+        id: call.id,
+        product: agent.key,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Net-new product requests only → the new-product channel (low volume).
+  const netNew = externalSignals.filter((s) => s.product === "new_product");
+  if (netNew.length > 0 && !hasAlerted(state, call.id, "new-product")) {
+    const channelId = config.slack.newProductChannel;
     if (!channelId) {
-      log("call.channel_not_configured", { id: call.id });
+      log("call.channel_not_configured", { id: call.id, tracker: "new-product" });
       failures++;
     } else {
       try {
         await sendSlackMessage(
           channelId,
-          renderCallSignals(call, result.account, externalSignals),
+          renderNewProductMessage(call, result.account, netNew),
         );
-        markAlerted(state, call.id, "product-signals");
+        markAlerted(state, call.id, "new-product");
         alerts++;
-        log("call.alerted", { id: call.id, signals: externalSignals.length });
+        log("call.alerted_new_product", { id: call.id, count: netNew.length });
       } catch (err) {
         failures++;
         log("call.alert_error", {
           id: call.id,
+          tracker: "new-product",
           error: err instanceof Error ? err.message : String(err),
         });
       }
     }
   }
+
+  if (alerts === 0 && failures === 0) log("call.no_signals", { id: call.id });
 
   return { processed: true, alerts, failures };
 }

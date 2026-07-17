@@ -1,5 +1,5 @@
 import type { Signal, SignalType } from "./claude.ts";
-import { config } from "./config.ts";
+import type { Agent } from "./config.ts";
 import type { GongCall } from "./gong.ts";
 
 function formatLongDate(iso: string): string {
@@ -21,7 +21,7 @@ function cleanName(name: string): string {
   return oneLine(name).replace(/^cc\s+/i, "");
 }
 
-// Sub-categories inside each agent paragraph. question + request_gap merge.
+// Sub-categories inside a message. question + request_gap merge into one.
 const SUBSECTIONS: Array<{ header: string; types: SignalType[] }> = [
   { header: "Questions, requests & gaps", types: ["question", "request_gap"] },
   { header: "Objections / concerns", types: ["objection"] },
@@ -62,33 +62,32 @@ function renderSubsections(signals: Signal[]): string[] {
   return lines;
 }
 
-// One consolidated message per call: a paragraph per agent that has signals
-// (each grouped into sub-categories), then a "New product opportunities" block
-// for net-new (non-agent) needs.
-export function renderCallSignals(
+// One message per agent that has signals, to that agent's channel.
+export function renderAgentMessage(
+  agent: Agent,
   call: GongCall,
   account: string,
   signals: Signal[],
 ): string {
-  const lines: string[] = [
-    `:bulb: *Product signals — ${account || call.title}*  · ${formatLongDate(call.started)}`,
+  const lines = [
+    `${agent.emoji} *${agent.label} — ${account || call.title}*  · ${formatLongDate(call.started)}`,
     `:link: <${call.url}|Open in Gong>`,
+    ...renderSubsections(signals),
   ];
+  return lines.join("\n");
+}
 
-  for (const agent of config.slack.agents) {
-    const group = signals.filter((s) => s.product === agent.key);
-    if (!group.length) continue;
-    lines.push("");
-    lines.push(`${agent.emoji} *${agent.label}*`);
-    lines.push(...renderSubsections(group));
-  }
-
-  const netNew = signals.filter((s) => s.product === "new_product");
-  if (netNew.length) {
-    lines.push("");
-    lines.push(`:seedling: *New product opportunities*`);
-    lines.push(...renderSubsections(netNew));
-  }
-
+// The new-product channel: only net-new product requests (not existing-product
+// features/integration). Low volume — not a message per call.
+export function renderNewProductMessage(
+  call: GongCall,
+  account: string,
+  signals: Signal[],
+): string {
+  const lines = [
+    `:seedling: *New product signal — ${account || call.title}*  · ${formatLongDate(call.started)}`,
+    `:link: <${call.url}|Open in Gong>`,
+    ...renderSubsections(signals),
+  ];
   return lines.join("\n");
 }

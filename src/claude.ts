@@ -54,8 +54,8 @@ Disambiguation: "Ken" as a person (a speaker/colleague) is NOT the product. Bare
 
 # Attribute each signal to a product
 - Set product to the Maki agent the signal concerns (tomo/mochi/kumi/shiro/ken) whenever it is about that agent — INCLUDING questions about integrating that agent with the customer's stack (ATS, Teams, WhatsApp…) and gaps/limitations in how that agent works today.
-- Use "new_product" ONLY for a need pointing to a product/capability Maki does NOT offer at all today, that would be net-new on the roadmap (e.g. sourcing / growing top-of-funnel, CRM-style candidate nurturing). "new_product" is NOT for integrations with existing systems, and NOT for improvements to an existing agent — those attach to the relevant agent.
-- If a platform/integration signal clearly serves one agent, attribute it to that agent. Only genuinely net-new product ideas go to "new_product".
+- Use "new_product" ONLY for a request pointing to a WHOLE NEW product/category Maki does NOT offer at all today, that would be net-new on the roadmap (e.g. sourcing / growing top-of-funnel, CRM-style candidate nurturing, onboarding). "new_product" is RARE and must be reserved for genuine new-product asks.
+- "new_product" is NOT for: a new feature/capability requested within an EXISTING agent (that is a request_gap on that agent), integrations with existing systems, or improvements to an existing agent — all of those attach to the relevant agent. When in doubt whether something is a net-new product vs. an extension of an existing agent, attribute it to the agent.
 
 # HARD EXCLUDE — never emit as a signal (even if deal-critical)
 - Anything not about the PRODUCT's own capabilities: sales-process & deal mechanics (benchmarks/market insights for the business case, business-case framing, pricing segmentation, ROI-argument framing, which materials to show which stakeholders, the language of GTM materials e.g. "run the workshop in Spanish"); pricing/commercial/contractual terms; positioning/messaging suggestions (e.g. "position Mochi as time-to-hire reduction").
@@ -88,7 +88,7 @@ const SIGNAL_ITEM_SCHEMA = {
       type: "string",
       enum: ["tomo", "mochi", "kumi", "shiro", "ken", "new_product"],
       description:
-        "Agent the signal concerns (incl. its integrations/gaps), or 'new_product' ONLY for a net-new capability Maki doesn't offer today (e.g. sourcing).",
+        "Agent the signal concerns (incl. its integrations/gaps/feature requests), or 'new_product' ONLY for a request for a WHOLE new product Maki doesn't offer today (e.g. sourcing). Rare.",
     },
     type: {
       type: "string",

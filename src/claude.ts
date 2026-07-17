@@ -69,18 +69,22 @@ Maki now leads externally with CAPABILITY NAMES; the original codenames are tran
 
 # Part 1 — product_findings
 
-Return one entry ONLY for a product that is MEANINGFULLY discussed.
+Create an entry for a product ONLY when at least ONE of these is true:
+1. REAL PITCH — a Maki rep actively describes what the product DOES, how it works, or the value it delivers, in a substantive way (a genuine explanation or demo, typically several sentences).
+2. PRODUCT-SPECIFIC ENGAGEMENT — the prospect/customer asks a question, raises an objection, or discusses THIS product specifically, beyond the rep merely naming it.
 
-meaningful=true requires ONE of:
-- a SUBSTANTIVE pitch — the rep explains what the product does, demos it, or makes a value case in a sustained block of speech; OR
-- a product-SPECIFIC question or objection from the prospect/customer.
+A "real pitch" is NOT any of the following, and these DO NOT qualify a product on their own:
+- a recap of what the call covered — e.g. "the majority of everything we spoke about was skills screening, phone screening…";
+- a passing name-drop — e.g. "we also have an agent called Mochi", "we have other agents for scheduling";
+- listing the product among others without explaining it.
 
-meaningful=false when the product is only NAMED — e.g. listed in a suite overview ("we also have Mochi for voice and Kumi for scheduling") — with no sustained pitch and no customer question/objection. Do NOT inflate a passing mention into a finding: it is normal for a call to MEANINGFULLY feature only one or two products even if all five are named somewhere. Only include a meaningful=false entry when a product is clearly named but doesn't clear the bar; otherwise omit it entirely.
+If a product is only named, listed, or recapped — with no real pitch AND no product-specific question/objection — DO NOT create a finding for it (omit it entirely). It is normal for a call to feature only one or two products meaningfully even if all five are named.
 
-For each finding:
-- primary_pitcher (Maki rep full name; empty if meaningful=false), account, pitch_quote (verbatim core of the pitch; empty if meaningful=false).
-- questions[]: genuine information-seeking QUESTIONS the prospect/customer asks about THIS product.
-- objections[]: pushback, doubts, concerns, or hesitations about THIS product.
+Only create entries that clear the bar above; set meaningful=true on each. For each:
+- pitch_quote — the verbatim core of the pitch. Fill ONLY if condition 1 holds. If the product qualifies only via condition 2 (a question/objection, no real pitch), leave pitch_quote EMPTY — NEVER manufacture a pitch from a recap or name-drop.
+- primary_pitcher — the Maki rep who delivers the pitch; EMPTY if there was no real pitch.
+- account.
+- questions[] / objections[] — questions/objections SPECIFICALLY ABOUT THIS product (its features, fit, pricing, results, concerns). A general question about the platform, the funnel, sourcing, or a DIFFERENT capability does NOT belong here — capture it as a customer_signal instead. Never let a non-product-specific question be the sole reason a product qualifies.
   Each entry (both arrays) has:
   - summary — a SELF-CONTAINED sentence stating what is being asked/objected, understandable without the transcript. Primary content.
   - quote — a verbatim excerpt that justifies the summary ("[paraphrase]" only if truly unclear).
@@ -93,12 +97,13 @@ For each finding:
 # Part 2 — customer_signals
 
 Signals the PRODUCT team can act on — things that inform what to BUILD, FIX, or PRIORITISE. Types:
-- feature_request — an explicit ask for a capability, or a "can it do X?" framed as a need.
-- gap — a concrete missing capability, limitation, or friction in the product.
+- feature_request — an explicit ask for a capability MAKI DOES NOT (clearly) HAVE, or a "can it do X?" framed as a need for something not currently offered.
+- gap — a concrete capability MAKI'S PRODUCT is MISSING or does poorly, that the customer needs.
 - sentiment — satisfaction/dissatisfaction TIED TO A SPECIFIC, ACTIONABLE PRODUCT CAUSE.
 - competitor — a competing/alternative tool the customer uses or evaluates (seeds: scheduling → GoodTime/ModernLoop/Paradox; deep assessment → SHL/HackerRank; interview recording → Otter/Granola/Fathom/Gong).
 
 STRICT BAR — a signal must help a product decision or trade-off. EXCLUDE (never emit):
+- A customer's operational pain that an EXISTING Maki agent already solves — that is discovery/qualification, NOT a product signal. E.g. "our recruiters manually read every resume for high-volume roles" is exactly what Skills Screening (Shiro) automates → NOT a gap. Only capture such a pain when it points to a capability Maki does NOT offer — e.g. "for low-volume supply-chain roles we need to source and hunt candidates" → sourcing / top-of-funnel, which Maki has no product for → valid signal.
 - Procurement / vendor-selection / tech-stack-consolidation / buying-process talk (e.g. "we're reviewing our whole stack", "a global project to simplify our vendors").
 - Contractual / legal / commercial terms (data-usage clauses, consent wording in the contract, pricing, SLAs).
 - Vague satisfaction scores or metrics with NO specific, actionable product cause (e.g. "candidate sat is 7.6, expected more", "immersive experience rated 2/10").
@@ -167,28 +172,35 @@ const ANALYSIS_TOOL: Anthropic.Tool = {
               type: "string",
               enum: ["tomo", "mochi", "kumi", "shiro", "ken"],
             },
-            meaningful: { type: "boolean" },
+            meaningful: {
+              type: "boolean",
+              description:
+                "Always true for an emitted finding. Only emit a product that has a REAL pitch OR a product-specific question/objection.",
+            },
             reason_if_skipped: {
               type: "string",
-              description: "If meaningful=false, one-sentence reason. Empty string otherwise.",
+              description: "Leave as empty string (products that don't qualify are omitted entirely).",
             },
             primary_pitcher: {
               type: "string",
-              description: "Maki rep who pitches this product. Empty if meaningful=false.",
+              description:
+                "Maki rep who delivers the pitch. EMPTY string if there was no real pitch (product qualifies only via a question/objection).",
             },
-            account: { type: "string", description: "Empty string if meaningful=false." },
+            account: { type: "string" },
             pitch_quote: {
               type: "string",
-              description: "1–4 sentence verbatim pitch. Empty string if meaningful=false.",
+              description:
+                "Verbatim core of the pitch (1–4 sentences). EMPTY string if there was no real pitch — never manufacture one from a call recap or a name-drop.",
             },
             questions: {
               type: "array",
-              description: "Information-seeking questions the prospect/customer asks about THIS product. Empty array if none.",
+              description:
+                "Questions SPECIFICALLY about THIS product. Route general/platform/other-capability questions to customer_signals, not here. Empty array if none.",
               items: INTERACTION_ITEM_SCHEMA,
             },
             objections: {
               type: "array",
-              description: "Pushback / doubts / concerns about THIS product. Empty array if none.",
+              description: "Objections / doubts / concerns SPECIFICALLY about THIS product. Empty array if none.",
               items: INTERACTION_ITEM_SCHEMA,
             },
             transcript_incomplete: { type: "boolean" },

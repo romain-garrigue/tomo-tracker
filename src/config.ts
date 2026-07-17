@@ -40,7 +40,7 @@ const dryRunChannel = process.env.DRY_RUN_CHANNEL || "";
 const trackers: Tracker[] = [
   { key: "tomo", label: "Tomo", emoji: ":studio_microphone:", channelId: dryRunChannel || channels.tomo },
   { key: "mochi", label: "Mochi", emoji: ":telephone_receiver:", channelId: dryRunChannel || channels.mochi },
-  { key: "kumi", label: "Kumi", emoji: ":calendar:", channelId: dryRunChannel || channels.kumi },
+  { key: "kumi", label: "Kumi", emoji: ":spiral_calendar_pad:", channelId: dryRunChannel || channels.kumi },
   { key: "shiro", label: "Shiro", emoji: ":clipboard:", channelId: dryRunChannel || channels.shiroKen },
   { key: "ken", label: "Ken", emoji: ":microscope:", channelId: dryRunChannel || channels.shiroKen },
 ];

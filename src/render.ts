@@ -58,17 +58,23 @@ export function renderProductMessage(
   signals: CustomerSignal[],
 ): string {
   const account = finding.account || call.title;
+  const hasPitch = oneLine(finding.pitch_quote).length > 0;
   const lines: string[] = [];
 
-  lines.push(
-    `${tracker.emoji} *${tracker.label} mentioned — ${finding.primary_pitcher} with <${call.url}|${account}>*`,
-  );
+  // "pitched — {rep} with {account}" for a real pitch; "discussed — {account}"
+  // when the product only came up via a question/objection (no manufactured pitch).
+  const verb = hasPitch ? "pitched" : "discussed";
+  const who = hasPitch && finding.primary_pitcher ? `${finding.primary_pitcher} with ` : "";
+  lines.push(`${tracker.emoji} *${tracker.label} ${verb} — ${who}<${call.url}|${account}>*`);
   lines.push(`:date: ${formatLongDate(call.started)}`);
   lines.push(`:link: <${call.url}|Open in Gong>`);
-  lines.push("");
-  lines.push(`*${tracker.label} pitched:*`);
-  lines.push(`> "${oneLine(finding.pitch_quote)}"`);
-  lines.push(`> — ${finding.primary_pitcher}`);
+
+  if (hasPitch) {
+    lines.push("");
+    lines.push(`*${tracker.label} pitched:*`);
+    lines.push(`> "${oneLine(finding.pitch_quote)}"`);
+    if (finding.primary_pitcher) lines.push(`> — ${finding.primary_pitcher}`);
+  }
 
   const questions = finding.questions ?? [];
   if (questions.length) {

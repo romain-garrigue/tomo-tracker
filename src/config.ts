@@ -38,9 +38,10 @@ export const config = {
   },
   slack: {
     botToken: required("SLACK_BOT_TOKEN"),
-    // Single consolidated channel (#product-signals). One message per call.
+    // Single consolidated channel. Reuses the existing tracker channel
+    // (was #tomo-mention-alerts; being renamed to a product-signals tracker).
     signalsChannel:
-      dryRunChannel || process.env.SLACK_CHANNEL_PRODUCT_SIGNALS || "C0BH20VCTFB",
+      dryRunChannel || process.env.SLACK_CHANNEL_PRODUCT_SIGNALS || "C0B0CHKC58X",
     agents,
   },
   anthropic: {

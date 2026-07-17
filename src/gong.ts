@@ -72,6 +72,11 @@ export async function listCalls(
         toDateTime,
         workspaceId: config.gong.workspaceId,
       },
+      // Expose parties so the substantive-call gate can tell internal-only
+      // calls (team syncs) from external prospect/customer calls.
+      contentSelector: {
+        exposedFields: { parties: true },
+      },
     };
     if (cursor) body.cursor = cursor;
     let json: any;
@@ -202,6 +207,20 @@ export function formatTimestamp(seconds: number): string {
   const s = total % 60;
   if (h > 0) return `${h}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
   return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+// Cheap gate for the combined pass: only skip calls that are explicitly
+// internal-only (every classified party is Internal). Fail open when parties
+// are missing or any party is External/Unknown, so we never drop a real
+// customer call just because Gong didn't classify a participant.
+export function hasExternalParty(call: GongCall): boolean {
+  const parties = call.parties ?? [];
+  if (parties.length === 0) return true;
+  const hasExternal = parties.some((p) => p.affiliation === "External");
+  const hasUnknown = parties.some(
+    (p) => !p.affiliation || p.affiliation === "Unknown",
+  );
+  return hasExternal || hasUnknown;
 }
 
 export function flattenTranscript(monologues: TranscriptMonologue[]): string {

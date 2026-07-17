@@ -1,12 +1,6 @@
-import type { AnalysisResult } from "./claude.ts";
+import type { Signal, SignalType } from "./claude.ts";
+import type { Agent } from "./config.ts";
 import type { GongCall } from "./gong.ts";
-
-const TOMO_SIGNAL_PATTERN =
-  /\btomo\b|interview recording|interview intelligence|interview companion|interview notes|ai interview summary/i;
-
-export function hasTomoSignal(transcript: string): boolean {
-  return TOMO_SIGNAL_PATTERN.test(transcript);
-}
 
 function formatLongDate(iso: string): string {
   const d = new Date(iso);
@@ -18,44 +12,82 @@ function formatLongDate(iso: string): string {
   });
 }
 
-export function renderMessage(call: GongCall, r: AnalysisResult): string {
-  const lines: string[] = [];
-  const account = r.account || call.title;
-  const dateLong = formatLongDate(call.started);
+function oneLine(text: string): string {
+  return (text ?? "").replace(/\s+/g, " ").trim();
+}
 
-  lines.push(
-    `:studio_microphone: *Tomo mentioned — ${r.primary_pitcher} with <${call.url}|${account}>*`,
-  );
-  lines.push(`:date: ${dateLong}`);
-  lines.push(`:link: <${call.url}|Open in Gong>`);
-  lines.push("");
-  lines.push(`*Tomo pitched:* \`${r.pitch_timestamp}\``);
-  lines.push(`> "${r.pitch_quote}"`);
-  lines.push(`> — ${r.primary_pitcher}`);
-  lines.push("");
+// Strip transcript artifacts like a leading "Cc " from speaker names.
+function cleanName(name: string): string {
+  return oneLine(name).replace(/^cc\s+/i, "");
+}
 
-  const objections = r.objections ?? [];
-  if (objections.length === 0) {
-    lines.push(`*Objections / Questions:* none`);
+// Sub-categories inside a message. question + request_gap merge into one.
+const SUBSECTIONS: Array<{ header: string; types: SignalType[] }> = [
+  { header: "Questions, requests & gaps", types: ["question", "request_gap"] },
+  { header: "Objections / concerns", types: ["objection"] },
+  { header: "Competitors", types: ["competitor"] },
+];
+
+// One idea per bullet: summary first, quote (with the speaker) beneath, then the
+// rep's handling for questions/objections.
+function renderBullet(s: Signal): string[] {
+  const speaker = cleanName(s.speaker_name);
+  const quote = oneLine(s.quote);
+  const out: string[] = [];
+  if (quote) {
+    out.push(`• ${oneLine(s.summary)}`);
+    out.push(`> "${quote}"${speaker ? ` — ${speaker}` : ""}`);
   } else {
-    lines.push(`*Objections / Questions:*`);
-    for (const o of objections) {
-      const head = `• \`${o.ts}\` — "${o.question_quote}" (${o.questioner_name})`;
-      if (o.rep_answered) {
-        lines.push(`${head} → Rep: "${o.rep_answer_or_deflection}"`);
-      } else {
-        lines.push(
-          `${head} → :warning: Rep did not answer / unclear answer — ${o.rep_answer_or_deflection}`,
-        );
-      }
+    out.push(`• ${oneLine(s.summary)}${speaker ? ` — ${speaker}` : ""}`);
+  }
+  if (s.type === "question" || s.type === "objection") {
+    const r = oneLine(s.rep_response);
+    if (s.rep_addressed) {
+      if (r) out.push(`→ Rep: "${r}"`);
+    } else {
+      out.push(`→ :warning: Unaddressed${r ? ` — ${r}` : ""}`);
     }
   }
+  return out;
+}
 
-  if (r.transcript_incomplete) {
-    lines.push("");
-    lines.push(
-      `:warning: _Transcript incomplete — pitch and objections may be partial._`,
-    );
+function renderSubsections(signals: Signal[]): string[] {
+  const lines: string[] = [];
+  for (const sub of SUBSECTIONS) {
+    const group = signals.filter((s) => sub.types.includes(s.type));
+    if (!group.length) continue;
+    lines.push(`*${sub.header}*`);
+    for (const s of group) lines.push(...renderBullet(s));
   }
+  return lines;
+}
+
+// One message per agent that has signals, to that agent's channel.
+export function renderAgentMessage(
+  agent: Agent,
+  call: GongCall,
+  account: string,
+  signals: Signal[],
+): string {
+  const lines = [
+    `${agent.emoji} *${agent.label} — ${account || call.title}*  · ${formatLongDate(call.started)}`,
+    `:link: <${call.url}|Open in Gong>`,
+    ...renderSubsections(signals),
+  ];
+  return lines.join("\n");
+}
+
+// The new-product channel: only net-new product requests (not existing-product
+// features/integration). Low volume — not a message per call.
+export function renderNewProductMessage(
+  call: GongCall,
+  account: string,
+  signals: Signal[],
+): string {
+  const lines = [
+    `:seedling: *New product signal — ${account || call.title}*  · ${formatLongDate(call.started)}`,
+    `:link: <${call.url}|Open in Gong>`,
+    ...renderSubsections(signals),
+  ];
   return lines.join("\n");
 }

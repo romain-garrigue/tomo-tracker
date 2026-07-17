@@ -1,136 +1,156 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { config } from "./config.ts";
+import { config, type ProductKey } from "./config.ts";
 import type { CallSummary, GongCall } from "./gong.ts";
 
 const client = new Anthropic({ apiKey: config.anthropic.apiKey });
 
-export interface ObjectionEntry {
-  ts: string;
-  question_quote: string;
-  questioner_name: string;
-  rep_answered: boolean;
-  rep_answer_or_deflection: string;
+// Which product a signal concerns. "new_product" = a net-new capability Maki
+// does NOT offer today (future-roadmap idea, e.g. sourcing) — NOT integrations
+// or improvements to an existing agent, which attach to that agent.
+export type SignalProduct = ProductKey | "new_product";
+
+// question + request_gap render together ("Questions / requests & gaps");
+// objection and competitor are their own sections.
+export type SignalType = "question" | "request_gap" | "objection" | "competitor";
+export type SpeakerSide = "prospect" | "customer" | "internal";
+
+export interface Signal {
+  product: SignalProduct;
+  type: SignalType;
+  speaker_name: string;
+  speaker_side: SpeakerSide;
+  account: string;
+  // Self-contained statement a PM who wasn't on the call can act on.
+  summary: string;
+  // Short verbatim excerpt that justifies the summary.
+  quote: string;
+  // For question/objection only: how the rep handled it.
+  rep_addressed: boolean;
+  rep_response: string;
 }
 
 export interface AnalysisResult {
-  meaningful: boolean;
-  reason_if_skipped?: string;
-  primary_pitcher?: string;
-  account?: string;
-  pitch_timestamp?: string;
-  pitch_quote?: string;
-  objections?: ObjectionEntry[];
-  transcript_incomplete?: boolean;
+  account: string;
+  signals: Signal[];
 }
 
-const SYSTEM_PROMPT = `You analyze Gong sales/CSM call transcripts for meaningful discussions of "Tomo" — Maki People's AI interview copilot product. You apply strict detection rules and return structured findings via the report_findings tool.
+const SYSTEM_PROMPT = `You analyze Gong sales/CSM call transcripts for Maki People, which sells five AI hiring agents (Shiro, Mochi, Ken, Kumi, Tomo). Via the report_findings tool (call it exactly once) you extract PRODUCT SIGNALS: everything a PROSPECT/CUSTOMER says that carries information about Maki's product — their questions, feature requests, gaps, objections/concerns, and competing tools.
 
-# Tomo signals (case-insensitive)
-A "Tomo signal" is any reference to: Tomo, interview recording, interview intelligence, interview companion, interview notes, AI interview summary.
+You do NOT summarize the sales pitch. A rep pitching an agent is NOT a signal — only the customer's reactions, questions, and needs are. A call where an agent is pitched but the customer says nothing about it produces NO signal for that agent.
 
-# Pitch detection
-A meaningful Tomo discussion requires the rep to ACTIVELY PITCH Tomo — explaining what it does, walking through features, or making a value case in a sustained block of speech. NOT a passing mention like "we also have an agent called Tomo" with no follow-up.
+# The five Maki products (for attributing each signal + disambiguation)
+- **tomo** — "Interview Co-pilot": joins live interviews, records/transcribes, generates interview plans + summaries + evaluation of the interviewer. Aliases: Tomo, interview co-pilot/assist/companion, interview notetaker/recorder. (Contrast set: Otter/Granola/Fathom.)
+- **mochi** — "Voice Screening": adaptive AI voice interviewer (web/phone) replacing the recruiter phone screen. Aliases: Mochi, voice screening, voice/phone screen, voice agent.
+- **kumi** — "Scheduling / Orchestration": calendar coordination, self-serve (re)scheduling, confirmations. Aliases: Kumi, scheduling, orchestration.
+- **shiro** — "Skills Screening": short structured online assessments replacing CV screening. Aliases: Shiro, skills screening/assessment, structured assessment.
+- **ken** — "Deep Assessment": in-depth assessment (coding, case study, system design, Compass personality). Aliases: Ken (THE PRODUCT ONLY — never a person named Ken), deep/in-depth assessment, case study, coding test.
+Disambiguation: "Ken" as a person (a speaker/colleague) is NOT the product. Bare "screening"/"assessment" → shiro (structured online test) vs mochi (voice conversation) only on modality cues; if unclear, use "general".
 
-If Tomo is introduced briefly early and then pitched in depth later, capture the DEEPER pitch's timestamp and quote, not the introduction.
+# Signal types
+- question — a product question that reveals a need, an evaluation criterion, or a capability the customer cares about. Examples worth capturing: "can Mochi evaluate candidates already in our pipeline, not just new applicants?"; "can Mochi place calls through our Teams VoIP?"; "can we split role-specific assessments so juniors only take the junior test?". NOT worth capturing: curiosity or pitch-clarification questions with no product implication — e.g. "is it the same technology behind Shiro and Mochi?", "is the conversational agent basically a bot?".
+- request_gap — a feature request OR a gap/limitation in the product the customer needs. Requests and gaps are the SAME category. Examples: "the junior assessment is too long (100+ questions, ~1h30) — need it around 45 min"; "integrate Mochi with Microsoft Teams"; "let WhatsApp go out under our brand, not Mochi's"; "the data export doesn't include expert assessments".
+- objection — a doubt, concern, risk, or pushback about the product. Example: "a voice AI agent may destabilize our older, experienced candidates and hurt our employer brand."
+- competitor — a competing PRODUCT the customer uses or evaluates (seeds: scheduling → GoodTime/ModernLoop/Paradox; deep assessment → SHL/HackerRank; interview recording → Otter/Granola/Fathom/Gong). CRITICAL: ATS platforms (iCIMS, Cegid/Talentsoft, SmartRecruiters, Avature, Workday, SuccessFactors, Greenhouse, Lever, …) are NOT competitors — they are integration targets. NEVER emit an ATS as a competitor.
 
-A call is meaningful if Tomo is actively pitched OR a customer asks a Tomo-specific question/objection. If Tomo is only mentioned in passing with no pitch, no question, and no objection — set meaningful=false.
+# Attribute each signal to a product
+- Set product to the Maki agent the signal concerns (tomo/mochi/kumi/shiro/ken) whenever it is about that agent — INCLUDING questions about integrating that agent with the customer's stack (ATS, Teams, WhatsApp…) and gaps/limitations in how that agent works today.
+- Use "new_product" ONLY for a request pointing to a WHOLE NEW product/category Maki does NOT offer at all today, that would be net-new on the roadmap (e.g. sourcing / growing top-of-funnel, CRM-style candidate nurturing, onboarding). "new_product" is RARE and must be reserved for genuine new-product asks.
+- "new_product" is NOT for: a new feature/capability requested within an EXISTING agent (that is a request_gap on that agent), integrations with existing systems, or improvements to an existing agent — all of those attach to the relevant agent. When in doubt whether something is a net-new product vs. an extension of an existing agent, attribute it to the agent.
 
-# Objections / Questions
-Capture every moment where the prospect or customer (NOT a Maki rep) asks a question, pushes back, expresses doubt, or signals hesitation about Tomo specifically (not other Maki products like Moki, Shiro, etc.).
+# HARD EXCLUDE — never emit as a signal (even if deal-critical)
+- Anything not about the PRODUCT's own capabilities: sales-process & deal mechanics (benchmarks/market insights for the business case, business-case framing, pricing segmentation, ROI-argument framing, which materials to show which stakeholders, the language of GTM materials e.g. "run the workshop in Spanish"); pricing/commercial/contractual terms; positioning/messaging suggestions (e.g. "position Mochi as time-to-hire reduction").
+- Client-reference / social-proof requests (e.g. "do you have references in engineering — EDF, Technip?"). That is sales, and a client-fit gap is NOT a product gap.
+- A need ALREADY MET by an existing Maki capability — INCLUDING when the rep confirms it is feasible/handled. E.g. "we want recruiters to stay in our ATS" when Maki already pushes results back and the rep confirms it → NOT a signal. "We manually read every resume" (Shiro already does this) → NOT a signal.
+- ATS integration when the rep confirms it works / is no problem. Emit an ATS-integration signal ONLY when it is genuinely uncertain or flagged as a risk/open question (type question or request_gap, attributed to the agent it serves).
+- The customer's OWN operational metrics or pain not tied to a product-capability gap (e.g. "only 35% of our applicants get a response", applicant volumes).
+- Curiosity / pitch-clarification questions with no product implication.
+- Procurement / vendor-selection / tech-stack talk. Vague satisfaction scores.
 
-For each: capture the timestamp, the verbatim quote (or label [paraphrase] if unclear), the questioner's name, whether the rep answered, and either the rep's verbatim answer OR a short verbatim phrase showing the deflection.
+Litmus test: could a PM open a build / fix / competitive-defense ticket from this? If not, DROP it. When unsure, DROP it. Fewer, sharper signals are far better than many weak ones.
 
-# Rules
-- Facts only. No commentary, scoring, or recommendations.
-- Never fabricate quotes. If unclear, label [paraphrase].
-- The transcript provided already includes timestamps in the form [MM:SS] or [H:MM:SS] at the start of each speaker turn — use those directly.
-- For pitch_timestamp and ts on objections: use the timestamp at the start of the relevant speaker turn (the [MM:SS] marker). Format as MM:SS or H:MM:SS — no leading "~", no minute-only values.
-- The "account" is the external company (e.g. "Booking.com", "Accenture") — derive from call title, summary, or external participants. If genuinely unknown, set account to the call title verbatim.
-- The "primary_pitcher" is the Maki rep who delivers the pitch. Use their full name as it appears in the transcript.
-`;
+# For each signal
+- summary — a SELF-CONTAINED sentence understandable by a PM who was not on the call. This is the primary content.
+- quote — a short verbatim excerpt that justifies the summary ("[paraphrase]" only if truly unclear).
+- speaker_name — the speaker's clean personal name (strip transcript artifacts such as a leading "Cc"/"cc").
+- speaker_side — prospect/customer; use "internal" ONLY when a Maki person relays a customer's point.
+- account, product, type.
+- rep_addressed + rep_response — for type question or objection ONLY. rep_addressed=true if the rep answered substantively OR committed to follow up ("I'll check and get back to you" = true). rep_response = the rep's verbatim answer/commitment, or if NOT addressed a short note of what the rep did instead. For request_gap and competitor: rep_addressed=false and rep_response empty.
+
+# account + global rules
+- account: the external company (from title, summary, or external participants); call title verbatim if unknown.
+- Facts only. NEVER fabricate quotes.
+- Deduplicate: one signal per distinct idea; never emit the same quote under two types. If a statement is both a competitor mention and a request, pick the primary product intent and note the other inside the summary.`;
+
+const SIGNAL_ITEM_SCHEMA = {
+  type: "object",
+  properties: {
+    product: {
+      type: "string",
+      enum: ["tomo", "mochi", "kumi", "shiro", "ken", "new_product"],
+      description:
+        "Agent the signal concerns (incl. its integrations/gaps/feature requests), or 'new_product' ONLY for a request for a WHOLE new product Maki doesn't offer today (e.g. sourcing). Rare.",
+    },
+    type: {
+      type: "string",
+      enum: ["question", "request_gap", "objection", "competitor"],
+    },
+    speaker_name: {
+      type: "string",
+      description: "Speaker's clean personal name (strip artifacts like a leading 'Cc').",
+    },
+    speaker_side: { type: "string", enum: ["prospect", "customer", "internal"] },
+    account: { type: "string" },
+    summary: {
+      type: "string",
+      description: "Self-contained sentence a PM who wasn't on the call can act on. Primary content.",
+    },
+    quote: {
+      type: "string",
+      description: "Short verbatim excerpt justifying the summary. '[paraphrase]' if unclear.",
+    },
+    rep_addressed: {
+      type: "boolean",
+      description:
+        "question/objection only: true if the rep answered substantively OR committed to follow up. false for request_gap/competitor.",
+    },
+    rep_response: {
+      type: "string",
+      description:
+        "question/objection only: rep's verbatim answer/commitment, or a short note of what they did instead if unaddressed. Empty for request_gap/competitor.",
+    },
+  },
+  required: [
+    "product",
+    "type",
+    "speaker_name",
+    "speaker_side",
+    "account",
+    "summary",
+    "quote",
+    "rep_addressed",
+    "rep_response",
+  ],
+} as const;
 
 const ANALYSIS_TOOL: Anthropic.Tool = {
   name: "report_findings",
   description:
-    "Report structured findings from the call transcript. Always call this exactly once.",
+    "Report product signals voiced by prospects/customers (questions, requests/gaps, objections, competitors). A rep's pitch is NOT a signal. Always call this exactly once.",
   input_schema: {
     type: "object",
     properties: {
-      meaningful: {
-        type: "boolean",
-        description:
-          "True if Tomo was actively pitched OR a customer raised a Tomo-specific question/objection. False if Tomo was only mentioned in passing with no pitch/question/objection.",
-      },
-      reason_if_skipped: {
-        type: "string",
-        description:
-          "If meaningful=false, a one-sentence reason. Empty string if meaningful=true.",
-      },
-      primary_pitcher: {
-        type: "string",
-        description:
-          "Full name of the Maki rep who pitches Tomo. Empty string if meaningful=false.",
-      },
       account: {
         type: "string",
-        description:
-          'External company name, e.g. "Booking.com", "Accenture". Empty string if meaningful=false.',
+        description: 'Call-level external company, e.g. "Booking.com". Call title verbatim if unknown.',
       },
-      pitch_timestamp: {
-        type: "string",
-        description:
-          "MM:SS or H:MM:SS of the deeper pitch start. Empty string if meaningful=false.",
-      },
-      pitch_quote: {
-        type: "string",
-        description:
-          "1–4 sentence verbatim quote where the rep delivers the pitch. Empty string if meaningful=false.",
-      },
-      objections: {
+      signals: {
         type: "array",
         description:
-          "Every Tomo-specific question/objection raised by the customer. Empty array if there are none.",
-        items: {
-          type: "object",
-          properties: {
-            ts: { type: "string" },
-            question_quote: { type: "string" },
-            questioner_name: { type: "string" },
-            rep_answered: {
-              type: "boolean",
-              description: "True if the rep answered substantively. False if they deflected or gave an unclear answer.",
-            },
-            rep_answer_or_deflection: {
-              type: "string",
-              description:
-                "If rep_answered=true: their verbatim answer. If rep_answered=false: a short verbatim phrase showing the deflection (e.g. \"I've not actually thought of it like that.\").",
-            },
-          },
-          required: [
-            "ts",
-            "question_quote",
-            "questioner_name",
-            "rep_answered",
-            "rep_answer_or_deflection",
-          ],
-        },
-      },
-      transcript_incomplete: {
-        type: "boolean",
-        description:
-          "True if the transcript appears truncated or the analysis may be partial.",
+          "Product signals from the prospect/customer. Apply the HARD-EXCLUDE list and the litmus test (could a PM open a ticket?). Deduplicate. Empty array if the customer raised nothing about the product.",
+        items: SIGNAL_ITEM_SCHEMA,
       },
     },
-    required: [
-      "meaningful",
-      "reason_if_skipped",
-      "primary_pitcher",
-      "account",
-      "pitch_timestamp",
-      "pitch_quote",
-      "objections",
-      "transcript_incomplete",
-    ],
+    required: ["account", "signals"],
   },
 };
 
@@ -157,11 +177,11 @@ ${transcript}
 
 ---
 
-Apply the detection rules and call report_findings exactly once.`;
+Extract the product signals and call report_findings exactly once.`;
 
   const response = await client.messages.create({
     model: config.anthropic.model,
-    max_tokens: 4096,
+    max_tokens: 8192,
     system: SYSTEM_PROMPT,
     tools: [ANALYSIS_TOOL],
     tool_choice: { type: "tool", name: "report_findings" },
@@ -176,5 +196,11 @@ Apply the detection rules and call report_findings exactly once.`;
       `Claude did not call report_findings. Stop reason: ${response.stop_reason}`,
     );
   }
-  return toolUse.input as AnalysisResult;
+  // Forced tool use doesn't strictly validate types — coerce defensively.
+  const input = toolUse.input as Record<string, unknown>;
+  return {
+    account:
+      typeof input.account === "string" && input.account ? input.account : call.title,
+    signals: Array.isArray(input.signals) ? (input.signals as Signal[]) : [],
+  };
 }

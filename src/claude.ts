@@ -76,6 +76,7 @@ Create an entry for a product ONLY when at least ONE of these is true:
 A "real pitch" is NOT any of the following, and these DO NOT qualify a product on their own:
 - a recap of what the call covered — e.g. "the majority of everything we spoke about was skills screening, phone screening…";
 - a passing name-drop — e.g. "we also have an agent called Mochi", "we have other agents for scheduling";
+- a pricing / cost / packaging discussion that names the product — e.g. "Shiro is 5,000 assessments at €1.75… Mochi costs more because of the telephony" — quoting costs or packaging is NOT explaining what the product does;
 - listing the product among others without explaining it.
 
 If a product is only named, listed, or recapped — with no real pitch AND no product-specific question/objection — DO NOT create a finding for it (omit it entirely). It is normal for a call to feature only one or two products meaningfully even if all five are named.
@@ -84,7 +85,7 @@ Only create entries that clear the bar above; set meaningful=true on each. For e
 - pitch_quote — the verbatim core of the pitch. Fill ONLY if condition 1 holds. If the product qualifies only via condition 2 (a question/objection, no real pitch), leave pitch_quote EMPTY — NEVER manufacture a pitch from a recap or name-drop.
 - primary_pitcher — the Maki rep who delivers the pitch; EMPTY if there was no real pitch.
 - account.
-- questions[] / objections[] — questions/objections SPECIFICALLY ABOUT THIS product (its features, fit, pricing, results, concerns). A general question about the platform, the funnel, sourcing, or a DIFFERENT capability does NOT belong here — capture it as a customer_signal instead. Never let a non-product-specific question be the sole reason a product qualifies.
+- questions[] / objections[] — SUBSTANTIVE questions/objections SPECIFICALLY ABOUT THIS product that reveal a real evaluation criterion, concern, doubt, or product limitation (its capabilities, fit, results). A general question about the platform, the funnel, sourcing, or a DIFFERENT capability does NOT belong here — route it to customer_signals instead. Skip trivial logistics/clarifications. Never let a non-product-specific question be the sole reason a product qualifies.
   Each entry (both arrays) has:
   - summary — a SELF-CONTAINED sentence stating what is being asked/objected, understandable without the transcript. Primary content.
   - quote — a verbatim excerpt that justifies the summary ("[paraphrase]" only if truly unclear).
@@ -96,19 +97,24 @@ Only create entries that clear the bar above; set meaningful=true on each. For e
 
 # Part 2 — customer_signals
 
-Signals the PRODUCT team can act on — things that inform what to BUILD, FIX, or PRIORITISE. Types:
-- feature_request — an explicit ask for a capability MAKI DOES NOT (clearly) HAVE, or a "can it do X?" framed as a need for something not currently offered.
-- gap — a concrete capability MAKI'S PRODUCT is MISSING or does poorly, that the customer needs.
-- sentiment — satisfaction/dissatisfaction TIED TO A SPECIFIC, ACTIONABLE PRODUCT CAUSE.
-- competitor — a competing/alternative tool the customer uses or evaluates (seeds: scheduling → GoodTime/ModernLoop/Paradox; deep assessment → SHL/HackerRank; interview recording → Otter/Granola/Fathom/Gong).
+A customer_signal is STRICTLY about Maki's PRODUCT — the capabilities of its hiring agents (Shiro, Mochi, Ken, Kumi, Tomo) and platform (exports, integrations, data, consent controls, candidate/recruiter experience). It answers ONE question: "what should we BUILD, FIX, or CHANGE in the PRODUCT?" If a statement is not about the product's own capabilities, it is NOT a signal — no matter how important it is to the deal.
 
-STRICT BAR — a signal must help a product decision or trade-off. EXCLUDE (never emit):
-- A customer's operational pain that an EXISTING Maki agent already solves — that is discovery/qualification, NOT a product signal. E.g. "our recruiters manually read every resume for high-volume roles" is exactly what Skills Screening (Shiro) automates → NOT a gap. Only capture such a pain when it points to a capability Maki does NOT offer — e.g. "for low-volume supply-chain roles we need to source and hunt candidates" → sourcing / top-of-funnel, which Maki has no product for → valid signal.
-- Procurement / vendor-selection / tech-stack-consolidation / buying-process talk (e.g. "we're reviewing our whole stack", "a global project to simplify our vendors").
-- Contractual / legal / commercial terms (data-usage clauses, consent wording in the contract, pricing, SLAs).
-- Vague satisfaction scores or metrics with NO specific, actionable product cause (e.g. "candidate sat is 7.6, expected more", "immersive experience rated 2/10").
-- General organizational or process context that isn't about the product's capabilities.
-When unsure whether something clears the bar, DROP it. Fewer, sharper signals are far better than many weak ones.
+Types:
+- feature_request — the customer asks for a PRODUCT capability that doesn't exist yet ("can Mochi do X?", "I wish Shiro could Y").
+- gap — a concrete limitation or missing capability IN THE PRODUCT the customer hits ("the data export doesn't include expert assessments", "no playback-speed control on video responses", "you have no sourcing / top-of-funnel product").
+- competitor — a competing PRODUCT the customer uses or evaluates (seeds: scheduling → GoodTime/ModernLoop/Paradox; deep assessment → SHL/HackerRank; interview recording → Otter/Granola/Fathom/Gong).
+- sentiment — satisfaction/dissatisfaction about how the PRODUCT actually works, tied to a specific product cause.
+
+HARD EXCLUDE — these are NEVER product signals, even when they matter to the deal:
+- Sales-process & deal mechanics: asking for benchmarks / market insights to support a business case; how to frame or structure the business case; how to segment or present pricing; ROI-argument framing; which materials to show which stakeholders; the language of GTM materials (e.g. "can we run the workshop in Spanish?").
+- Pricing / commercial / contractual terms (cost per assessment, packaging, discounts, data-usage clauses, SLAs).
+- Positioning / messaging / usage suggestions (e.g. "position Mochi as time-to-hire reduction") — that is messaging, not a product feature.
+- The customer's OWN operational metrics or pain that isn't a product-capability gap (e.g. "only 35% of our applicants get a response", applicant volumes, "our recruiters manually read every resume" — already solved by existing agents). Capture such a pain ONLY when it points to a capability Maki genuinely LACKS (e.g. sourcing for low-volume roles).
+- Procurement / vendor-selection / tech-stack consolidation.
+- Vague satisfaction scores with no specific product cause (e.g. "candidate sat 7.6, expected more").
+- Sales-enablement tooling asks (e.g. "a built-in ROI calculator") — not part of the hiring product.
+
+Litmus test: could a product manager open a ticket to build or fix something in the agents or platform from this? If not, DROP it. When unsure, DROP it — fewer, sharper signals are far better than many weak ones.
 
 For each signal:
 - summary — a SELF-CONTAINED sentence stating the need/gap/request/sentiment clearly enough for a PM who was NOT on the call to understand and act. Include the WHAT and essential context. THIS is the primary content.
@@ -221,7 +227,7 @@ const ANALYSIS_TOOL: Anthropic.Tool = {
       customer_signals: {
         type: "array",
         description:
-          "Product-team-actionable signals voiced by prospects/customers. Apply the STRICT BAR — drop procurement/contractual/vague-satisfaction/process talk. Deduplicate. Empty array if none.",
+          "Signals STRICTLY about Maki's PRODUCT (what to build/fix/change in the agents or platform). HARD-EXCLUDE sales-process, pricing/commercial, positioning/messaging, the customer's own operational metrics, and GTM logistics — even when deal-critical. Litmus: could a PM open a build/fix ticket from it? Deduplicate. Empty array if none.",
         items: {
           type: "object",
           properties: {

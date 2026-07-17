@@ -21,18 +21,25 @@ function cleanName(name: string): string {
   return oneLine(name).replace(/^cc\s+/i, "");
 }
 
-// Short tag so mixed bullets stay scannable within one agent paragraph.
-const TYPE_TAG: Record<SignalType, string> = {
-  question: "question",
-  request_gap: "request",
-  objection: "objection",
-  competitor: "competitor",
-};
+// Sub-categories inside each agent paragraph. question + request_gap merge.
+const SUBSECTIONS: Array<{ header: string; types: SignalType[] }> = [
+  { header: "Questions, requests & gaps", types: ["question", "request_gap"] },
+  { header: "Objections / concerns", types: ["objection"] },
+  { header: "Competitors", types: ["competitor"] },
+];
 
-function renderSignalBullet(s: Signal): string[] {
-  const out = [`• _[${TYPE_TAG[s.type]}]_ ${oneLine(s.summary)} — ${cleanName(s.speaker_name)}`];
-  if (s.quote) out.push(`> "${oneLine(s.quote)}"`);
-  // Only questions/objections carry a rep response.
+// One idea per bullet: summary first, quote (with the speaker) beneath, then the
+// rep's handling for questions/objections.
+function renderBullet(s: Signal): string[] {
+  const speaker = cleanName(s.speaker_name);
+  const quote = oneLine(s.quote);
+  const out: string[] = [];
+  if (quote) {
+    out.push(`• ${oneLine(s.summary)}`);
+    out.push(`> "${quote}"${speaker ? ` — ${speaker}` : ""}`);
+  } else {
+    out.push(`• ${oneLine(s.summary)}${speaker ? ` — ${speaker}` : ""}`);
+  }
   if (s.type === "question" || s.type === "objection") {
     const r = oneLine(s.rep_response);
     if (s.rep_addressed) {
@@ -44,8 +51,20 @@ function renderSignalBullet(s: Signal): string[] {
   return out;
 }
 
-// One consolidated message per call: a paragraph per agent that has signals,
-// then a "New product opportunities" section for net-new (non-agent) needs.
+function renderSubsections(signals: Signal[]): string[] {
+  const lines: string[] = [];
+  for (const sub of SUBSECTIONS) {
+    const group = signals.filter((s) => sub.types.includes(s.type));
+    if (!group.length) continue;
+    lines.push(`*${sub.header}*`);
+    for (const s of group) lines.push(...renderBullet(s));
+  }
+  return lines;
+}
+
+// One consolidated message per call: a paragraph per agent that has signals
+// (each grouped into sub-categories), then a "New product opportunities" block
+// for net-new (non-agent) needs.
 export function renderCallSignals(
   call: GongCall,
   account: string,
@@ -61,14 +80,14 @@ export function renderCallSignals(
     if (!group.length) continue;
     lines.push("");
     lines.push(`${agent.emoji} *${agent.label}*`);
-    for (const s of group) lines.push(...renderSignalBullet(s));
+    lines.push(...renderSubsections(group));
   }
 
   const netNew = signals.filter((s) => s.product === "new_product");
   if (netNew.length) {
     lines.push("");
     lines.push(`:seedling: *New product opportunities*`);
-    for (const s of netNew) lines.push(...renderSignalBullet(s));
+    lines.push(...renderSubsections(netNew));
   }
 
   return lines.join("\n");

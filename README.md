@@ -1,4 +1,4 @@
-# tomo-tracker
+# product-trackers
 
 Hands-off monitor that scans new Gong calls every few hours and posts **product signals** to Slack — everything a prospect/customer says about Maki's five AI agents (questions, feature requests, gaps, objections, competitors), routed to a channel per agent, plus a separate channel for net-new product ideas.
 

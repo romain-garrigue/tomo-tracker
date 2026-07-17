@@ -4,9 +4,10 @@ import type { CallSummary, GongCall } from "./gong.ts";
 
 const client = new Anthropic({ apiKey: config.anthropic.apiKey });
 
-// Which product a signal concerns; "general" = platform-wide / cross-agent /
-// a capability Maki has no product for (sourcing, exports, ATS integration…).
-export type SignalProduct = ProductKey | "general";
+// Which product a signal concerns. "new_product" = a net-new capability Maki
+// does NOT offer today (future-roadmap idea, e.g. sourcing) — NOT integrations
+// or improvements to an existing agent, which attach to that agent.
+export type SignalProduct = ProductKey | "new_product";
 
 // question + request_gap render together ("Questions / requests & gaps");
 // objection and competitor are their own sections.
@@ -52,13 +53,15 @@ Disambiguation: "Ken" as a person (a speaker/colleague) is NOT the product. Bare
 - competitor — a competing PRODUCT the customer uses or evaluates (seeds: scheduling → GoodTime/ModernLoop/Paradox; deep assessment → SHL/HackerRank; interview recording → Otter/Granola/Fathom/Gong). CRITICAL: ATS platforms (iCIMS, Cegid/Talentsoft, SmartRecruiters, Avature, Workday, SuccessFactors, Greenhouse, Lever, …) are NOT competitors — they are integration targets. NEVER emit an ATS as a competitor.
 
 # Attribute each signal to a product
-Set product to the agent it concerns (tomo/mochi/kumi/shiro/ken) when specific to one agent; otherwise "general" (platform-wide, cross-agent, or a capability Maki has no product for — e.g. sourcing, data exports, ATS integration).
+- Set product to the Maki agent the signal concerns (tomo/mochi/kumi/shiro/ken) whenever it is about that agent — INCLUDING questions about integrating that agent with the customer's stack (ATS, Teams, WhatsApp…) and gaps/limitations in how that agent works today.
+- Use "new_product" ONLY for a need pointing to a product/capability Maki does NOT offer at all today, that would be net-new on the roadmap (e.g. sourcing / growing top-of-funnel, CRM-style candidate nurturing). "new_product" is NOT for integrations with existing systems, and NOT for improvements to an existing agent — those attach to the relevant agent.
+- If a platform/integration signal clearly serves one agent, attribute it to that agent. Only genuinely net-new product ideas go to "new_product".
 
 # HARD EXCLUDE — never emit as a signal (even if deal-critical)
 - Anything not about the PRODUCT's own capabilities: sales-process & deal mechanics (benchmarks/market insights for the business case, business-case framing, pricing segmentation, ROI-argument framing, which materials to show which stakeholders, the language of GTM materials e.g. "run the workshop in Spanish"); pricing/commercial/contractual terms; positioning/messaging suggestions (e.g. "position Mochi as time-to-hire reduction").
 - Client-reference / social-proof requests (e.g. "do you have references in engineering — EDF, Technip?"). That is sales, and a client-fit gap is NOT a product gap.
 - A need ALREADY MET by an existing Maki capability — INCLUDING when the rep confirms it is feasible/handled. E.g. "we want recruiters to stay in our ATS" when Maki already pushes results back and the rep confirms it → NOT a signal. "We manually read every resume" (Shiro already does this) → NOT a signal.
-- ATS integration when the rep confirms it works / is no problem. Emit an ATS-integration signal ONLY when it is genuinely uncertain or flagged as a risk/open question (type question or request_gap, product "general").
+- ATS integration when the rep confirms it works / is no problem. Emit an ATS-integration signal ONLY when it is genuinely uncertain or flagged as a risk/open question (type question or request_gap, attributed to the agent it serves).
 - The customer's OWN operational metrics or pain not tied to a product-capability gap (e.g. "only 35% of our applicants get a response", applicant volumes).
 - Curiosity / pitch-clarification questions with no product implication.
 - Procurement / vendor-selection / tech-stack talk. Vague satisfaction scores.
@@ -83,8 +86,9 @@ const SIGNAL_ITEM_SCHEMA = {
   properties: {
     product: {
       type: "string",
-      enum: ["tomo", "mochi", "kumi", "shiro", "ken", "general"],
-      description: "Agent the signal concerns, or 'general' if platform-wide/cross-agent/no product.",
+      enum: ["tomo", "mochi", "kumi", "shiro", "ken", "new_product"],
+      description:
+        "Agent the signal concerns (incl. its integrations/gaps), or 'new_product' ONLY for a net-new capability Maki doesn't offer today (e.g. sourcing).",
     },
     type: {
       type: "string",

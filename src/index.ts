@@ -8,7 +8,7 @@ import {
   listCalls,
   type GongCall,
 } from "./gong.ts";
-import { renderAgentMessage, renderGeneralSignalsMessage } from "./render.ts";
+import { renderCallSignals } from "./render.ts";
 import { sendSlackMessage } from "./slack.ts";
 import {
   hasAlerted,
@@ -61,56 +61,27 @@ async function processCall(call: GongCall, state: State): Promise<CallOutcome> {
   let alerts = 0;
   let failures = 0;
 
-  // One message per agent that has ≥1 signal, to that agent's channel. No
-  // signal about an agent → no message (a pitch alone is not worth an alert).
-  for (const tracker of config.slack.trackers) {
-    const agentSignals = externalSignals.filter((s) => s.product === tracker.key);
-    if (agentSignals.length === 0) continue;
-    if (hasAlerted(state, call.id, tracker.key)) continue;
-    if (!tracker.channelId) {
-      log("call.channel_not_configured", { id: call.id, tracker: tracker.key });
-      failures++;
-      continue;
-    }
-    try {
-      await sendSlackMessage(
-        tracker.channelId,
-        renderAgentMessage(tracker, call, result.account, agentSignals),
-      );
-      markAlerted(state, call.id, tracker.key);
-      alerts++;
-      log("call.alerted_product", { id: call.id, product: tracker.key });
-    } catch (err) {
-      failures++;
-      log("call.alert_error", {
-        id: call.id,
-        product: tracker.key,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  // General / platform-wide signals (not tied to one agent) → #product-signals.
-  const generalSignals = externalSignals.filter((s) => s.product === "general");
-  if (generalSignals.length > 0 && !hasAlerted(state, call.id, "product-signals")) {
-    const channelId = config.slack.productSignalsChannel;
+  // One consolidated message per call → the single #product-signals channel.
+  if (externalSignals.length === 0) {
+    log("call.no_signals", { id: call.id });
+  } else if (!hasAlerted(state, call.id, "product-signals")) {
+    const channelId = config.slack.signalsChannel;
     if (!channelId) {
-      log("call.channel_not_configured", { id: call.id, tracker: "product-signals" });
+      log("call.channel_not_configured", { id: call.id });
       failures++;
     } else {
       try {
         await sendSlackMessage(
           channelId,
-          renderGeneralSignalsMessage(call, result.account, generalSignals),
+          renderCallSignals(call, result.account, externalSignals),
         );
         markAlerted(state, call.id, "product-signals");
         alerts++;
-        log("call.alerted_signals", { id: call.id, count: generalSignals.length });
+        log("call.alerted", { id: call.id, signals: externalSignals.length });
       } catch (err) {
         failures++;
         log("call.alert_error", {
           id: call.id,
-          tracker: "product-signals",
           error: err instanceof Error ? err.message : String(err),
         });
       }

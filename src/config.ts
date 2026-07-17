@@ -4,46 +4,30 @@ function required(name: string): string {
   return v;
 }
 
-// The five product codenames we route to per-product channels.
+// The five product codenames a signal can be attributed to.
 export type ProductKey = "tomo" | "mochi" | "kumi" | "shiro" | "ken";
 
-// Every logical destination (5 products + the customer-signals feed).
+// Idempotency-ledger key. One consolidated message per call → "product-signals".
 export type TrackerKey = ProductKey | "product-signals";
 
-export interface Tracker {
+// Emoji + label per agent, used to render one paragraph per agent (in this order).
+export interface Agent {
   key: ProductKey;
   label: string;
   emoji: string;
-  channelId: string;
 }
 
-// Slack channel IDs. Env-overridable so local dry-runs can route everything
-// to a DM. #tomo-mention-alerts already exists; the rest are created at rollout.
-const channels = {
-  // `||` (not `??`) so an empty env var (unset GitHub Actions variable) still
-  // falls back to the known #tomo-mention-alerts ID rather than blanking it.
-  tomo: process.env.SLACK_CHANNEL_TOMO || "C0B0CHKC58X",
-  mochi: process.env.SLACK_CHANNEL_MOCHI ?? "",
-  kumi: process.env.SLACK_CHANNEL_KUMI ?? "",
-  // Shiro and Ken share one channel (#shiro-ken-mention-alerts).
-  shiroKen: process.env.SLACK_CHANNEL_SHIRO_KEN ?? "",
-  productSignals: process.env.SLACK_CHANNEL_PRODUCT_SIGNALS ?? "",
-};
-
-// When set, route EVERY tracker + the signals feed to this one channel/DM
-// instead of the real channels — a safe end-to-end dry-run that never touches
-// production channels. Wired to the workflow_dispatch `dry_run_channel` input.
-const dryRunChannel = process.env.DRY_RUN_CHANNEL || "";
-
-// One entry per product codename. Shiro and Ken point at the same channel but
-// keep distinct labels/emojis so the header says which product was pitched.
-const trackers: Tracker[] = [
-  { key: "tomo", label: "Tomo", emoji: ":studio_microphone:", channelId: dryRunChannel || channels.tomo },
-  { key: "mochi", label: "Mochi", emoji: ":telephone_receiver:", channelId: dryRunChannel || channels.mochi },
-  { key: "kumi", label: "Kumi", emoji: ":spiral_calendar_pad:", channelId: dryRunChannel || channels.kumi },
-  { key: "shiro", label: "Shiro", emoji: ":clipboard:", channelId: dryRunChannel || channels.shiroKen },
-  { key: "ken", label: "Ken", emoji: ":microscope:", channelId: dryRunChannel || channels.shiroKen },
+const agents: Agent[] = [
+  { key: "tomo", label: "Tomo", emoji: ":studio_microphone:" },
+  { key: "mochi", label: "Mochi", emoji: ":telephone_receiver:" },
+  { key: "kumi", label: "Kumi", emoji: ":spiral_calendar_pad:" },
+  { key: "shiro", label: "Shiro", emoji: ":clipboard:" },
+  { key: "ken", label: "Ken", emoji: ":microscope:" },
 ];
+
+// When set (workflow_dispatch dry_run input), route the message here (e.g. a DM)
+// instead of the real channel — a safe end-to-end dry-run.
+const dryRunChannel = process.env.DRY_RUN_CHANNEL || "";
 
 export const config = {
   gong: {
@@ -54,10 +38,10 @@ export const config = {
   },
   slack: {
     botToken: required("SLACK_BOT_TOKEN"),
-    channels,
-    trackers,
-    productSignalsChannel: dryRunChannel || channels.productSignals,
-    productSignalsEmoji: ":bulb:",
+    // Single consolidated channel (#product-signals). One message per call.
+    signalsChannel:
+      dryRunChannel || process.env.SLACK_CHANNEL_PRODUCT_SIGNALS || "C0BH20VCTFB",
+    agents,
   },
   anthropic: {
     apiKey: required("ANTHROPIC_API_KEY"),

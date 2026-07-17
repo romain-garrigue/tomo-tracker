@@ -1,5 +1,5 @@
 import { analyze } from "./claude.ts";
-import { config, type ProductKey, type Tracker } from "./config.ts";
+import { config } from "./config.ts";
 import {
   flattenTranscript,
   getCallSummary,
@@ -8,7 +8,7 @@ import {
   listCalls,
   type GongCall,
 } from "./gong.ts";
-import { renderProductMessage, renderSignalsMessage } from "./render.ts";
+import { renderAgentMessage, renderGeneralSignalsMessage } from "./render.ts";
 import { sendSlackMessage } from "./slack.ts";
 import {
   hasAlerted,
@@ -19,10 +19,6 @@ import {
 } from "./state.ts";
 
 const OVERLAP_HOURS = 1;
-
-const trackerByKey = new Map<ProductKey, Tracker>(
-  config.slack.trackers.map((t) => [t.key, t]),
-);
 
 function log(msg: string, meta?: Record<string, unknown>): void {
   const stamp = new Date().toISOString();
@@ -59,72 +55,57 @@ async function processCall(call: GongCall, state: State): Promise<CallOutcome> {
   log("call.analyze", { id: call.id });
   const result = await analyze(call, transcript, summary);
 
-  // Prospect/customer-voiced signals; internal-relayed ones are dropped.
-  const externalSignals = result.customer_signals.filter(
-    (s) => s.speaker_side !== "internal",
-  );
+  // Prospect/customer-voiced signals only; drop internal-relayed ones.
+  const externalSignals = result.signals.filter((s) => s.speaker_side !== "internal");
 
   let alerts = 0;
   let failures = 0;
 
-  // Per-product fan-out. The agent message is enriched with that product's
-  // own requests/gaps/competitors, pulled from the shared signal extraction.
-  for (const finding of result.product_findings) {
-    if (!finding.meaningful) continue;
-    const tracker = trackerByKey.get(finding.product);
-    if (!tracker) {
-      log("call.unknown_product", { id: call.id, product: finding.product });
-      continue;
-    }
-    if (hasAlerted(state, call.id, finding.product)) continue;
+  // One message per agent that has ≥1 signal, to that agent's channel. No
+  // signal about an agent → no message (a pitch alone is not worth an alert).
+  for (const tracker of config.slack.trackers) {
+    const agentSignals = externalSignals.filter((s) => s.product === tracker.key);
+    if (agentSignals.length === 0) continue;
+    if (hasAlerted(state, call.id, tracker.key)) continue;
     if (!tracker.channelId) {
-      log("call.channel_not_configured", {
-        id: call.id,
-        tracker: finding.product,
-      });
+      log("call.channel_not_configured", { id: call.id, tracker: tracker.key });
       failures++;
       continue;
     }
-    const productSignals = externalSignals.filter((s) => s.product === finding.product);
     try {
       await sendSlackMessage(
         tracker.channelId,
-        renderProductMessage(tracker, call, finding, productSignals),
+        renderAgentMessage(tracker, call, result.account, agentSignals),
       );
-      markAlerted(state, call.id, finding.product);
+      markAlerted(state, call.id, tracker.key);
       alerts++;
-      log("call.alerted_product", { id: call.id, product: finding.product });
+      log("call.alerted_product", { id: call.id, product: tracker.key });
     } catch (err) {
       failures++;
       log("call.alert_error", {
         id: call.id,
-        product: finding.product,
+        product: tracker.key,
         error: err instanceof Error ? err.message : String(err),
       });
     }
   }
 
-  // Customer-signals fan-out (grouped per call, one message to #product-signals).
-  if (externalSignals.length > 0 && !hasAlerted(state, call.id, "product-signals")) {
+  // General / platform-wide signals (not tied to one agent) → #product-signals.
+  const generalSignals = externalSignals.filter((s) => s.product === "general");
+  if (generalSignals.length > 0 && !hasAlerted(state, call.id, "product-signals")) {
     const channelId = config.slack.productSignalsChannel;
     if (!channelId) {
-      log("call.channel_not_configured", {
-        id: call.id,
-        tracker: "product-signals",
-      });
+      log("call.channel_not_configured", { id: call.id, tracker: "product-signals" });
       failures++;
     } else {
       try {
         await sendSlackMessage(
           channelId,
-          renderSignalsMessage(call, externalSignals, result.account),
+          renderGeneralSignalsMessage(call, result.account, generalSignals),
         );
         markAlerted(state, call.id, "product-signals");
         alerts++;
-        log("call.alerted_signals", {
-          id: call.id,
-          count: externalSignals.length,
-        });
+        log("call.alerted_signals", { id: call.id, count: generalSignals.length });
       } catch (err) {
         failures++;
         log("call.alert_error", {

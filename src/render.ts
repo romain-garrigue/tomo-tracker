@@ -1,4 +1,4 @@
-import type { Signal, SignalType } from "./claude.ts";
+import type { Pitch, Signal, SignalType } from "./claude.ts";
 import type { Agent } from "./config.ts";
 import type { GongCall } from "./gong.ts";
 
@@ -62,18 +62,29 @@ function renderSubsections(signals: Signal[]): string[] {
   return lines;
 }
 
-// One message per agent that has signals, to that agent's channel.
+// One message per agent that has signals, to that agent's channel. If the rep
+// pitched the agent on this call, the pitch (quote + pitcher) leads for context.
 export function renderAgentMessage(
   agent: Agent,
   call: GongCall,
   account: string,
   signals: Signal[],
+  pitch?: Pitch,
 ): string {
   const lines = [
     `${agent.emoji} *${agent.label} — ${account || call.title}*  · ${formatLongDate(call.started)}`,
     `:link: <${call.url}|Open in Gong>`,
-    ...renderSubsections(signals),
   ];
+  if (pitch && oneLine(pitch.quote)) {
+    lines.push("");
+    lines.push(`*Pitched by ${cleanName(pitch.pitcher)}:*`);
+    lines.push(`> "${oneLine(pitch.quote)}"`);
+  }
+  const subs = renderSubsections(signals);
+  if (subs.length) {
+    lines.push("");
+    lines.push(...subs);
+  }
   return lines.join("\n");
 }
 
@@ -87,7 +98,11 @@ export function renderNewProductMessage(
   const lines = [
     `:seedling: *New product signal — ${account || call.title}*  · ${formatLongDate(call.started)}`,
     `:link: <${call.url}|Open in Gong>`,
-    ...renderSubsections(signals),
   ];
+  const subs = renderSubsections(signals);
+  if (subs.length) {
+    lines.push("");
+    lines.push(...subs);
+  }
   return lines.join("\n");
 }

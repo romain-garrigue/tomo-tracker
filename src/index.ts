@@ -71,10 +71,11 @@ async function processCall(call: GongCall, state: State): Promise<CallOutcome> {
       failures++;
       continue;
     }
+    const pitch = result.pitches.find((p) => p.product === agent.key);
     try {
       await sendSlackMessage(
         agent.channelId,
-        renderAgentMessage(agent, call, result.account, agentSignals),
+        renderAgentMessage(agent, call, result.account, agentSignals, pitch),
       );
       markAlerted(state, call.id, agent.key);
       alerts++;

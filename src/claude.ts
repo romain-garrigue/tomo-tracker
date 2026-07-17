@@ -29,14 +29,24 @@ export interface Signal {
   rep_response: string;
 }
 
+// A Maki rep actively pitching an agent (context for the alert; never a trigger).
+export interface Pitch {
+  product: ProductKey;
+  pitcher: string;
+  quote: string;
+}
+
 export interface AnalysisResult {
   account: string;
   signals: Signal[];
+  pitches: Pitch[];
 }
 
-const SYSTEM_PROMPT = `You analyze Gong sales/CSM call transcripts for Maki People, which sells five AI hiring agents (Shiro, Mochi, Ken, Kumi, Tomo). Via the report_findings tool (call it exactly once) you extract PRODUCT SIGNALS: everything a PROSPECT/CUSTOMER says that carries information about Maki's product — their questions, feature requests, gaps, objections/concerns, and competing tools.
+const SYSTEM_PROMPT = `You analyze Gong sales/CSM call transcripts for Maki People, which sells five AI hiring agents (Shiro, Mochi, Ken, Kumi, Tomo). Via the report_findings tool (call it exactly once) you return two things:
+1. signals[] — everything a PROSPECT/CUSTOMER says that carries information about Maki's product (questions, feature requests, gaps, objections/concerns, competing tools).
+2. pitches[] — each agent a MAKI REP actively pitches, with who pitched it and the pitch quote (context only).
 
-You do NOT summarize the sales pitch. A rep pitching an agent is NOT a signal — only the customer's reactions, questions, and needs are. A call where an agent is pitched but the customer says nothing about it produces NO signal for that agent.
+A pitch is NOT a signal and never triggers an alert on its own — capture it only in pitches[]. Signals come from the customer side; pitches come from the rep side.
 
 # The five Maki products (for attributing each signal + disambiguation)
 - **tomo** — "Interview Co-pilot": joins live interviews, records/transcribes, generates interview plans + summaries + evaluation of the interviewer. Aliases: Tomo, interview co-pilot/assist/companion, interview notetaker/recorder. (Contrast set: Otter/Granola/Fathom.)
@@ -75,6 +85,9 @@ Litmus test: could a PM open a build / fix / competitive-defense ticket from thi
 - speaker_side — prospect/customer; use "internal" ONLY when a Maki person relays a customer's point.
 - account, product, type.
 - rep_addressed + rep_response — for type question or objection ONLY. rep_addressed=true if the rep answered substantively OR committed to follow up ("I'll check and get back to you" = true). rep_response = the rep's verbatim answer/commitment, or if NOT addressed a short note of what the rep did instead. For request_gap and competitor: rep_addressed=false and rep_response empty.
+
+# pitches[]
+For each agent a Maki rep ACTIVELY pitches, add one entry: product, pitcher (rep's full name), quote (1–4 sentence verbatim core of the pitch). A real pitch = the rep explains what the product DOES, how it works, or the value it delivers. It is NOT: a call recap ("the majority of what we discussed was…"), a name-drop ("we also have Mochi"), or a pricing/packaging discussion. At most one entry per agent (the strongest pitch). Omit agents not genuinely pitched.
 
 # account + global rules
 - account: the external company (from title, summary, or external participants); call title verbatim if unknown.
@@ -149,8 +162,22 @@ const ANALYSIS_TOOL: Anthropic.Tool = {
           "Product signals from the prospect/customer. Apply the HARD-EXCLUDE list and the litmus test (could a PM open a ticket?). Deduplicate. Empty array if the customer raised nothing about the product.",
         items: SIGNAL_ITEM_SCHEMA,
       },
+      pitches: {
+        type: "array",
+        description:
+          "Agents a Maki rep actively pitched (context only, never a trigger). At most one per agent; omit agents not genuinely pitched (no recaps/name-drops/pricing).",
+        items: {
+          type: "object",
+          properties: {
+            product: { type: "string", enum: ["tomo", "mochi", "kumi", "shiro", "ken"] },
+            pitcher: { type: "string", description: "Full name of the Maki rep who pitched." },
+            quote: { type: "string", description: "1–4 sentence verbatim core of the pitch." },
+          },
+          required: ["product", "pitcher", "quote"],
+        },
+      },
     },
-    required: ["account", "signals"],
+    required: ["account", "signals", "pitches"],
   },
 };
 
@@ -202,5 +229,6 @@ Extract the product signals and call report_findings exactly once.`;
     account:
       typeof input.account === "string" && input.account ? input.account : call.title,
     signals: Array.isArray(input.signals) ? (input.signals as Signal[]) : [],
+    pitches: Array.isArray(input.pitches) ? (input.pitches as Pitch[]) : [],
   };
 }

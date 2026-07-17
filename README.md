@@ -1,162 +1,123 @@
 # tomo-tracker
 
-Hands-off monitor that scans new Gong calls every few hours and posts structured Slack alerts whenever Sales or CSMs meaningfully discuss one of **Maki's five AI hiring agents** — or whenever a prospect/customer drops a **product signal** (feature request, gap, sentiment, competitor mention).
+Hands-off monitor that scans new Gong calls every few hours and posts **product signals** to Slack — everything a prospect/customer says about Maki's five AI agents (questions, feature requests, gaps, objections, competitors), routed to a channel per agent, plus a separate channel for net-new product ideas.
 
-One repo, one workflow, **one Gong pass per call** fanning out to six logical trackers across five channels. The whole thing runs from this repo via GitHub Actions — no local cron, no local state.
+It surfaces the **customer's voice about the product**, not the sales pitch (a pitch with no customer reaction produces no alert). Runs entirely from this repo via GitHub Actions — no local cron, no local state.
 
-> The repo keeps the name `tomo-tracker` for continuity; it now tracks the whole agent suite.
+> The repo keeps the name `tomo-tracker` for continuity; it now covers the whole agent suite.
 
-## Trackers → channels
+## Channels
 
-| Tracker | Product (capability) | Channel |
-|---|---|---|
-| `tomo` | Tomo — Interview Co-pilot | `#tomo-mention-alerts` |
-| `mochi` | Mochi — Voice Screening | `#mochi-mention-alerts` |
-| `kumi` | Kumi — Scheduling / Orchestration | `#kumi-mention-alerts` |
-| `shiro` | Shiro — Skills Screening | `#shiro-ken-mention-alerts` (shared) |
-| `ken` | Ken — Deep Assessment | `#shiro-ken-mention-alerts` (shared) |
-| `product-signals` | customer feature requests / gaps / sentiment / competitors | `#product-signals` |
+| Signal | Channel |
+|---|---|
+| Tomo (Interview Co-pilot) | `#tomo-mention-alerts` (`C0B0CHKC58X`) |
+| Mochi (Voice Screening) | `#mochi-mention-alerts` (`C0BH3QDQXS8`) |
+| Kumi (Scheduling) | `#kumi-mention-alerts` (`C0BH20RQH2M`) |
+| Shiro (Skills Screening) & Ken (Deep Assessment) | `#shiro-ken-mention-alerts` (`C0BGJN0925D`, shared) |
+| Net-new product requests | new-product channel (`C0BH20VCTFB`) |
 
-Shiro and Ken share one channel; the message header says which product was pitched.
+One message per agent that has signals on a given call, to that agent's channel. The **new-product channel** is low-volume: it receives *only* requests for products Maki doesn't offer yet (e.g. sourcing) — never new features on existing products (those go to the agent's channel).
 
-## What it captures
+## What a "signal" is
 
-**Per-product alerts** — for every call where a product is **actively pitched** (not just mentioned in passing):
+A prospect/customer statement the **product team can act on** — the litmus test is "could a PM open a build/fix ticket from it?". Four types:
 
-- **Pitch timestamp** — exact `MM:SS` from the Gong transcript, jump straight to that moment.
-- **Objections / questions** raised by the prospect/customer about that product, with timestamps and verbatim quotes.
-- **Unanswered questions** — flagged when the rep deflects or gives an unclear answer, captured verbatim.
+- **question** — a product question revealing a real need or evaluation criterion.
+- **request_gap** — a feature request or a concrete gap/limitation in the product.
+- **objection** — a doubt, concern, or risk about the product.
+- **competitor** — a competing *product* the customer uses/evaluates. (ATS platforms — iCIMS, Cegid/Talentsoft, SmartRecruiters, Avature… — are never competitors; they're integration targets.)
 
-**Product signals** — one grouped message per call collecting what prospects/customers say:
+Deliberately excluded: sales-process/deal mechanics, pricing/commercial, positioning/messaging, the customer's own operational metrics, client-reference asks, curiosity/pitch-clarification questions, and needs already met.
 
-- `feature_request`, `gap`, `sentiment`, `competitor` — each with a timestamp, verbatim quote, and speaker.
+## Message format
 
-Detection keys on the **capability name + codename + jargon** (Maki now leads externally with capability names), and the model disambiguates hard cases — notably "Ken" the product vs. a person named Ken. Grounded in the Notion source of truth *"Discover the Maki AI Agents"*.
+```
+:bulb: *Mochi — Apave*  · July 17, 2026
+:link: <gong-url|Open in Gong>
+
+*Questions, requests & gaps*
+• {self-contained summary of the ask}
+> "{verbatim quote}" — {speaker}
+→ Rep: "{how the rep answered}"
+
+*Objections / concerns*
+• {summary}
+> "{quote}" — {speaker}
+→ :warning: Unaddressed — {what the rep did instead}
+```
+
+Sub-category headers group the bullets; each bullet leads with a self-contained summary, the quote (with speaker) beneath, then how the rep handled it. No timestamps.
 
 ## Architecture
 
 ```
-.github/workflows/tomo-tracker.yml      cron + workflow_dispatch
+.github/workflows/tomo-tracker.yml      cron + workflow_dispatch (+ dry-run inputs)
             │
-            ▼
    npm ci → npm run typecheck → npm start (src/index.ts)
             │
             ├── Gong API   ── list calls / transcript / extensive (parties, summary)
+            ├── gate       ── skip if transcript < 50 chars OR internal-only
+            ├── Anthropic  ── ONE combined Claude call → report_findings { signals[] }
+            └── Slack      ── bot token (chat.postMessage) → per-agent + new-product channels
             │
-            ├── gate       ── skip if transcript < 50 chars OR call is internal-only
-            │
-            ├── Anthropic  ── ONE combined Claude call per call → report_findings
-            │                  { product_findings[], customer_signals[] }
-            │
-            └── Slack      ── bot token (chat.postMessage) fans out per tracker
-            │
-            ▼
-   state/processed_calls.json updated, committed by GH Actions
+   state/processed_calls.json updated (flushed per call), committed by GH Actions
 ```
 
-**One combined Claude call per substantive call.** `#product-signals` isn't keyword-bound, so an LLM pass is needed on essentially every substantive call anyway — folding the 5-product detection into that same call is cheaper (1 call vs. N), sees the full transcript once, and lets the model disambiguate. Forced tool use with a strict JSON schema — the model calls `report_findings` exactly once, no free-form text, no hallucinated quotes.
+Forced tool use with a strict JSON schema — the model calls `report_findings` exactly once; no free-form text, no hallucinated quotes.
 
-## Idempotency & state
+## State & idempotency
 
-`state/processed_calls.json`:
-
-```json
-{
-  "lastRunAt": "ISO",
-  "processedCallIds": ["…"],
-  "sentAlerts": ["<callId>:<trackerKey>", "…"]
-}
-```
-
-- **`processedCallIds`** — calls the combined pass already analyzed (cost control, capped at 1000).
-- **`sentAlerts`** — every alert sent, keyed `"<callId>:<trackerKey>"` (capped at 3000). Prevents duplicate posts and makes backfill / adding a product later safe. A call is only marked fully processed once **all** its sends succeed, so a not-yet-invited channel retries next run without re-posting the ones that already landed.
+`state/processed_calls.json`: `{ lastRunAt, processedCallIds (cap 1000), sentAlerts (cap 3000) }`. `sentAlerts` holds `"<callId>:<trackerKey>"` for every message sent, so re-runs never duplicate. State is flushed after every call and committed with `if: always()`, so a timeout mid-backfill resumes cleanly.
 
 ## Repo layout
 
 ```
 src/
-├── index.ts        # main: list → gate → analyze once → fan out → save state
-├── config.ts       # env loading, bot token, channels map, trackers array
-├── gong.ts         # Gong API client (timestamped transcripts + hasExternalParty)
-├── claude.ts       # combined system prompt + report_findings schema (the brain)
-├── render.ts       # renderProductMessage + renderSignalsMessage
-├── slack.ts        # chat.postMessage via bot token
-└── state.ts        # read/write state + sentAlerts ledger
-.github/workflows/
-└── tomo-tracker.yml
-state/
-└── processed_calls.json
+├── index.ts     # list → gate → analyze once → route per agent + new-product → save state
+├── config.ts    # env, bot token, agents (label/emoji/channel), new-product channel
+├── gong.ts      # Gong client (transcripts + hasExternalParty)
+├── claude.ts    # system prompt + report_findings schema (the brain)
+├── render.ts    # Slack message rendering (sub-categories)
+├── slack.ts     # chat.postMessage via bot token
+└── state.ts     # read/write state + sentAlerts ledger
 ```
 
 ## Run cadence
 
-GitHub Actions cron (UTC): `7 7,10,13,16 * * 1-5` — ≈ **8:07 / 11:07 / 14:07 / 17:07** Paris in winter, one hour later in summer (DST). Firings can be delayed a few minutes under load. To change cadence, edit the workflow.
-
-## Slack bot setup (one-time)
-
-1. **Create the channels**: `#mochi-mention-alerts`, `#kumi-mention-alerts`, `#shiro-ken-mention-alerts`, `#product-signals` (`#tomo-mention-alerts` already exists).
-2. **Create a Slack app** → **OAuth & Permissions** → add bot scope **`chat:write`** → **Install to Workspace** → copy the **Bot User OAuth Token** (`xoxb-…`).
-3. **Invite the bot** into all **5** channels — including `#tomo-mention-alerts` (it switched from webhook to bot token, so the bot must be a member or posts fail with `not_in_channel`).
-4. Add the token + channel IDs to GitHub (below).
+GitHub Actions cron (UTC): `7 7,10,13,16 * * 1-5` — ≈ 8:07/11:07/14:07/17:07 Paris in winter, one hour later in summer.
 
 ## GitHub configuration
 
-**Secrets** (`Settings → Secrets and variables → Actions → Secrets`):
+Secrets (`Settings → Secrets and variables → Actions`):
 
-| Secret | Where to get it |
+| Secret | Where |
 |---|---|
-| `GONG_ACCESS_KEY` | Gong → Company Settings → API → Generate access key |
-| `GONG_ACCESS_KEY_SECRET` | Same flow — shown once |
-| `SLACK_BOT_TOKEN` | Slack app → OAuth & Permissions → Bot User OAuth Token (`xoxb-…`) |
-| `ANTHROPIC_API_KEY` | https://console.anthropic.com → API keys |
+| `GONG_ACCESS_KEY` / `GONG_ACCESS_KEY_SECRET` | Gong → Company Settings → API |
+| `SLACK_BOT_TOKEN` | Slack app → OAuth & Permissions → Bot User OAuth Token (`xoxb-…`, scope `chat:write`, bot invited to every channel) |
+| `ANTHROPIC_API_KEY` | https://console.anthropic.com |
 
-**Variables** (`… → Variables`) — channel IDs, not secret (right-click a channel → *View channel details* → ID at the bottom):
+Channel IDs default in `src/config.ts` (override per channel with `SLACK_CHANNEL_{TOMO,MOCHI,KUMI,SHIRO_KEN,NEW_PRODUCT}` if a channel ever moves).
 
-| Variable | Channel |
-|---|---|
-| `SLACK_CHANNEL_TOMO` | `#tomo-mention-alerts` (defaults to `C0B0CHKC58X` if unset) |
-| `SLACK_CHANNEL_MOCHI` | `#mochi-mention-alerts` |
-| `SLACK_CHANNEL_KUMI` | `#kumi-mention-alerts` |
-| `SLACK_CHANNEL_SHIRO_KEN` | `#shiro-ken-mention-alerts` |
-| `SLACK_CHANNEL_PRODUCT_SIGNALS` | `#product-signals` |
-
-An unset channel variable simply skips that tracker until its channel exists — the others keep working.
-
-## Manual run
+## Manual run & dry-run
 
 ```
-gh workflow run tomo-tracker
+gh workflow run tomo-tracker                                   # real run on main
+gh workflow run tomo-tracker --ref <branch> \                  # safe dry-run:
+  -f dry_run_channel=<channel-or-DM-id> -f backfill_days=3      # all msgs → one channel, throwaway state
 ```
-
-…or click *Run workflow* in the Actions UI. Same code whether cron or manual.
 
 ## Local debugging
 
 ```bash
 npm install
-cp .env.example .env   # fill in the secrets + channel IDs
+cp .env.example .env   # fill in secrets; set SLACK_CHANNEL_* to your DM id for a local dry-run
 npm start
 ```
 
-For a safe **dry-run**, set every `SLACK_CHANNEL_*` in `.env` to your own DM/user ID (e.g. `U096JJ1GSAJ`) so all trackers post to you instead of the real channels. (`.env` is gitignored — never commit credentials.)
-
-## Resetting / backfilling state
-
-To force re-analysis of recent calls (e.g. after editing the prompt or adding a product):
+## Resetting / backfilling
 
 ```bash
-echo '{ "lastRunAt": "2026-07-01T00:00:00Z", "processedCallIds": [], "sentAlerts": [] }' > state/processed_calls.json
-git add state/processed_calls.json && git commit -m "state: reset for re-analysis" && git push
-```
-
-To backfill new trackers **without** re-spamming `#tomo-mention-alerts` for historical calls, keep the existing `"<id>:tomo"` entries in `sentAlerts` while clearing `processedCallIds`. The next run re-analyzes the window but only posts alerts whose `sentAlerts` key is new.
-
-## Files of note
-
-| Path | Purpose |
-|---|---|
-| [`src/claude.ts`](src/claude.ts) | Grounded product roster + signal types + tool schema (the brain) |
-| [`src/render.ts`](src/render.ts) | Slack message formats (product alert + signals) |
-| [`src/gong.ts`](src/gong.ts) | Gong API client — transcripts include `[MM:SS]` timestamps |
-| [`state/processed_calls.json`](state/processed_calls.json) | Ledger: `lastRunAt` + processed IDs + `sentAlerts` |
+# forward-only (default at cutover): lastRunAt=now, fresh ledger
+# to backfill N days into the channels, instead set lastRunAt = now − N days and clear processedCallIds + sentAlerts
+git add state/processed_calls.json && git commit -m "state: reset" && git push
 ```
